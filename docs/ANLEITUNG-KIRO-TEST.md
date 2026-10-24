@@ -437,15 +437,14 @@ Containers“** und die Ausgabe von `kubectl get pod <name> -o wide`. Zum Aufrä
 Ohne diese Funktion fragt Kiro in jedem neuen Container oder Pod nach einer Anmeldung. Mit ihr
 kopiert die Extension beim Verbinden deine lokale Anmeldedatei
 (`~/.aws/sso/cache/kiro-auth-token.json`) ins Home-Verzeichnis des Containers oder Pods. Die
-Funktion ist **standardmäßig aus**.
+Funktion ist **standardmäßig an**. Du musst auf deinem Rechner in Kiro angemeldet sein.
 
-### 12a: Einschalten
+### 12a: Version installieren
 
-1. Installiere die neueste Version aus dem **neuesten grünen Lauf** (wie in 10a) und starte Kiro neu.
-2. **Datei → Einstellungen → Einstellungen** (oder Strg+,), im Reiter **Benutzer** nach
-   `shareKiroLogin` suchen und **„Dev › Containers: Share Kiro Login“** anhaken. Die Einstellung
-   gibt es nur in den Benutzer-Einstellungen, nicht pro Projekt.
-3. Wenn die Einstellung fehlt: Ist der Ordner im Eingeschränkten Modus (Schritt 6)?
+Installiere die neueste Version aus dem **neuesten grünen Lauf** (wie in 10a) und starte Kiro neu.
+Die Einstellung heißt `dev.containers.shareKiroLogin` („Dev › Containers: Share Kiro Login“). Sie
+steht standardmäßig auf „an“ und lässt sich nur in den **Benutzer**-Einstellungen ändern, nicht pro
+Projekt.
 
 ### 12b: Prüfen
 
@@ -458,7 +457,7 @@ Funktion ist **standardmäßig aus**.
       nachdem du im Container mit Kiro gearbeitet hast. Kiro erneuert die Anmeldung regelmäßig. Wenn
       es dabei den Erneuerungs-Schlüssel austauscht, kann die eine Seite die andere abmelden. Das
       ist die Frage, die ich noch nicht beantworten kann.
-- [ ] Schalte die Einstellung wieder aus und öffne einen weiteren neuen Container: Es wird nichts
+- [ ] Schalte die Einstellung aus und öffne einen weiteren neuen Container: Es wird nichts
       kopiert, und Kiro fragt nach der Anmeldung.
 
 ### 12c: Wieder entfernen
@@ -466,9 +465,8 @@ Funktion ist **standardmäßig aus**.
 Im Terminal des Containers: `rm ~/.aws/sso/cache/kiro-auth-token.json`, oder in Kiro dort abmelden.
 
 **Bedenke:** Die kopierte Datei ist ein Zugangsdatum im Container oder Pod. Jeder, der dort Befehle
-ausführen darf, kann sie lesen (bei einer Anmeldung im Container ist das genauso). Aktiviere die
-Funktion deshalb nicht für Pods in einem Cluster, den du dir mit anderen teilst, wenn dir das nicht
-recht ist.
+ausführen darf, kann sie lesen (bei einer Anmeldung im Container ist das genauso). Schalte die
+Einstellung aus, wenn du Container oder Pods öffnest, auf die andere Zugriff haben.
 
 ---
 

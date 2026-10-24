@@ -57,7 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // The sign-in is read for every connection, and only when the user has chosen to share it.
   const kiroLogin = async (): Promise<string | undefined> =>
     readSettings().shareKiroLogin
-      ? readLocalLoginFile(os.homedir(), (message) => logger.log('warn', message))
+      ? readLocalLoginFile(os.homedir(), (level, message) => logger.log(level, message))
       : undefined;
   const remoteSupport = new RemoteSupport();
 

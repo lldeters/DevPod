@@ -75,13 +75,13 @@ Use `docs/ANLEITUNG-KIRO-TEST.md`, step 10, which has a ready-made project.
 
 ### 6b. Sharing the Kiro sign-in
 
-Enable `dev.containers.shareKiroLogin` in the user settings first.
+`dev.containers.shareKiroLogin` is on by default; sign in to Kiro on this machine first.
 
 - [ ] A new container or pod window starts without asking to sign in; the log says _Copied the Kiro
       sign-in of this machine into the container._
 - [ ] Sign-in on this machine is still valid afterwards, also after Kiro in the container renewed its
       copy (this shows whether renewal signs out the other side).
-- [ ] With the setting off, nothing is copied.
+- [ ] With `dev.containers.shareKiroLogin` turned off, nothing is copied.
 
 ### 7. Kubernetes pods
 

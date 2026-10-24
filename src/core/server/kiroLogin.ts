@@ -31,11 +31,12 @@ export function checkLoginFile(text: string): string | undefined {
 
 /**
  * Reads the sign-in file of this machine. Returns `undefined` if there is none or it does not look
- * like one; the reason goes to `report`. The content is never logged.
+ * like one; the reason goes to `report` (a missing file is only worth an `info`, since the user may
+ * simply not be signed in here). The content is never logged.
  */
 export async function readLocalLoginFile(
   homeDir: string,
-  report: (message: string) => void,
+  report: (level: 'info' | 'warn', message: string) => void,
 ): Promise<string | undefined> {
   const file = path.join(homeDir, ...KIRO_LOGIN_RELATIVE_PATH.split('/'));
   let text: string;
@@ -43,15 +44,18 @@ export async function readLocalLoginFile(
     text = await readFile(file, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      report('There is no Kiro sign-in on this machine to share; sign in to Kiro here first.');
+      report('info', 'There is no Kiro sign-in on this machine to share.');
     } else {
-      report(`The Kiro sign-in on this machine could not be read (${path.basename(file)}).`);
+      report(
+        'warn',
+        `The Kiro sign-in on this machine could not be read (${path.basename(file)}).`,
+      );
     }
     return undefined;
   }
   const problem = checkLoginFile(text);
   if (problem) {
-    report(`The Kiro sign-in on this machine is not shared because ${problem}.`);
+    report('warn', `The Kiro sign-in on this machine is not shared because ${problem}.`);
     return undefined;
   }
   return text;

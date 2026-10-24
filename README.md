@@ -93,7 +93,7 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | `dev.containers.serverDownloadUrlTemplate` | empty    | Where to download the IDE server (see above).                             |
 | `dev.containers.kubectlPath`               | empty    | `kubectl` for pods; else the Kubernetes extension's, else `PATH`.         |
 | `dev.containers.kubeconfigPath`            | empty    | kubeconfig for pods; else the Kubernetes extension's, else kubectl's own. |
-| `dev.containers.shareKiroLogin`            | `false`  | Copy this machine's Kiro sign-in into containers and pods (see below).    |
+| `dev.containers.shareKiroLogin`            | `true`   | Copy this machine's Kiro sign-in into containers and pods (see below).    |
 
 ## Kubernetes pods
 
@@ -129,7 +129,7 @@ whether the port was requested and forwarded; see `docs/ANLEITUNG-KIRO-TEST.md`,
 ### Skipping the sign-in: `dev.containers.shareKiroLogin`
 
 Kiro keeps its sign-in in `~/.aws/sso/cache/kiro-auth-token.json`. With
-`dev.containers.shareKiroLogin` enabled (off by default, user settings only), the extension copies
+`dev.containers.shareKiroLogin` (**on by default**, user settings only), the extension copies
 that file from your machine into the home directory of the container user, or of the pod's
 container user, when you connect. Kiro there then does not ask to sign in. Be aware of what this
 means:
@@ -139,7 +139,8 @@ means:
 - An existing sign-in in the container is never replaced, and nothing is copied back.
 - The copy shares one session with this machine. If Kiro rotates the refresh token when it renews
   the sign-in (not confirmed), a renewal on one side can sign out the other.
-- To remove it, run `rm ~/.aws/sso/cache/kiro-auth-token.json` in the container, or sign out in
+- Turn the setting off if you open containers or pods that other people can access.
+- To remove a copy, run `rm ~/.aws/sso/cache/kiro-auth-token.json` in the container, or sign out in
   Kiro there.
 
 Verified so far: Kiro in a pod accepted a file copied there by hand. The setting itself has been

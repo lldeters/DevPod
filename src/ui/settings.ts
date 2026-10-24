@@ -31,6 +31,6 @@ export function readSettings(): Settings {
     serverDownloadUrlTemplate: nonEmpty(config.get<string>('serverDownloadUrlTemplate')),
     kubectlPath: nonEmpty(config.get<string>('kubectlPath')),
     kubeconfigPath: nonEmpty(config.get<string>('kubeconfigPath')),
-    shareKiroLogin: config.get<boolean>('shareKiroLogin') ?? false,
+    shareKiroLogin: config.get<boolean>('shareKiroLogin') ?? true,
   };
 }

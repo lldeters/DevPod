@@ -47,23 +47,32 @@ describe('readLocalLoginFile', () => {
 
   it('returns the content of the sign-in file', async () => {
     await writeLogin(SECRET);
-    const reports: string[] = [];
-    expect(await readLocalLoginFile(home, (m) => reports.push(m))).toBe(SECRET);
+    const reports: { level: string; message: string }[] = [];
+    expect(
+      await readLocalLoginFile(home, (level, message) => reports.push({ level, message })),
+    ).toBe(SECRET);
     expect(reports).toEqual([]);
   });
 
   it('says so when there is no sign-in on this machine', async () => {
-    const reports: string[] = [];
-    expect(await readLocalLoginFile(home, (m) => reports.push(m))).toBeUndefined();
-    expect(reports.join('\n')).toContain('no Kiro sign-in on this machine');
+    const reports: { level: string; message: string }[] = [];
+    expect(
+      await readLocalLoginFile(home, (level, message) => reports.push({ level, message })),
+    ).toBeUndefined();
+    expect(reports).toEqual([
+      { level: 'info', message: 'There is no Kiro sign-in on this machine to share.' },
+    ]);
   });
 
   it('does not share a file that does not look like a sign-in, and never reports its content', async () => {
     await writeLogin('SECRET-NOT-JSON');
-    const reports: string[] = [];
-    expect(await readLocalLoginFile(home, (m) => reports.push(m))).toBeUndefined();
+    const reports: { level: string; message: string }[] = [];
+    expect(
+      await readLocalLoginFile(home, (level, message) => reports.push({ level, message })),
+    ).toBeUndefined();
     expect(reports).toHaveLength(1);
-    expect(reports.join('\n')).not.toContain('SECRET');
+    expect(reports[0]?.level).toBe('warn');
+    expect(JSON.stringify(reports)).not.toContain('SECRET');
   });
 });
 

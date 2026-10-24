@@ -60,9 +60,9 @@ Features contribute. From it the resolver reads:
   rewritten. The text is written through a quoted here-document with a random delimiter. A problem
   here is logged and does not stop the connection. `portsAttributes` and `otherPortsAttributes` use
   the same shape as `remote.portsAttributes` / `remote.otherPortsAttributes` and travel the same way.
-- **Kiro sign-in** (`src/core/server/kiroLogin.ts`, opt-in setting `dev.containers.shareKiroLogin`,
-  scope `application` so a workspace cannot switch it on). The file `~/.aws/sso/cache/kiro-auth-token.json`
-  of this machine is read when the setting is on, checked to be a small JSON object, and written by
+- **Kiro sign-in** (`src/core/server/kiroLogin.ts`, setting `dev.containers.shareKiroLogin`, on by
+  default, scope `application` so a workspace cannot change it). The file `~/.aws/sso/cache/kiro-auth-token.json`
+  of this machine is read when the setting is on (a missing file is only logged at info level), checked to be a small JSON object, and written by
   a `sh -s` script (content on stdin through a quoted here-document, so never in an argument list)
   to `$HOME` of the exec user in the container or pod, right after the platform check. The script
   uses the real `$HOME`, not the `/tmp` fallback the server may live in, and writes nothing without

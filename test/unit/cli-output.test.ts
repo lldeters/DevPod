@@ -1,0 +1,99 @@
+import { describe, expect, it } from 'vitest';
+import {
+  parseCliLogLine,
+  parseReadConfigurationResult,
+  parseUpResult,
+} from '../../src/core/cli/output';
+import type { DevContainerError } from '../../src/core/errors';
+
+describe('parseCliLogLine', () => {
+  it('maps the CLI log levels', () => {
+    expect(parseCliLogLine('{"type":"text","level":3,"text":"hello"}')).toEqual({
+      kind: 'text',
+      level: 'info',
+      text: 'hello',
+    });
+    expect(parseCliLogLine('{"type":"start","level":2,"text":"Run: docker ps"}')).toMatchObject({
+      kind: 'start',
+      level: 'debug',
+    });
+    expect(parseCliLogLine('{"type":"text","level":5,"text":"bad"}').level).toBe('error');
+    expect(parseCliLogLine('{"type":"text","level":1,"text":"t"}').level).toBe('trace');
+  });
+
+  it('uses the name of progress events as text', () => {
+    expect(
+      parseCliLogLine('{"type":"progress","level":3,"name":"Building","status":"running"}'),
+    ).toMatchObject({ kind: 'progress', text: 'Building' });
+  });
+
+  it('passes non-JSON lines through as raw text', () => {
+    expect(parseCliLogLine('Step 1/5 : FROM ubuntu')).toEqual({
+      kind: 'raw',
+      level: 'info',
+      text: 'Step 1/5 : FROM ubuntu',
+    });
+    expect(parseCliLogLine('{"unrelated":true}').kind).toBe('raw');
+  });
+});
+
+describe('parseUpResult', () => {
+  const ok = {
+    outcome: 'success',
+    containerId: 'abc123',
+    remoteUser: 'vscode',
+    remoteWorkspaceFolder: '/workspaces/app',
+    composeProjectName: 'app_devcontainer',
+  };
+
+  it('parses a success document', () => {
+    expect(parseUpResult(JSON.stringify(ok))).toEqual(ok);
+  });
+
+  it('finds the document after other output lines', () => {
+    expect(parseUpResult(`some noise\n${JSON.stringify(ok)}\n`).containerId).toBe('abc123');
+  });
+
+  it('turns an error outcome into a CLI_FAILED error with its description', () => {
+    const text = JSON.stringify({
+      outcome: 'error',
+      message: 'Build failed',
+      description: 'exit 1',
+    });
+    expect(() => parseUpResult(text)).toThrowError(/Build failed: exit 1/);
+    try {
+      parseUpResult(text);
+    } catch (error) {
+      expect((error as DevContainerError).code).toBe('CLI_FAILED');
+    }
+  });
+
+  it('rejects empty and incomplete output', () => {
+    expect(() => parseUpResult('')).toThrowError(/no result/);
+    expect(() => parseUpResult('{"outcome":"success"}')).toThrowError(/containerId/);
+    expect(() => parseUpResult('{"foo":1}')).toThrowError(/outcome/);
+  });
+});
+
+describe('parseReadConfigurationResult', () => {
+  it('extracts configuration and workspace folder', () => {
+    const result = parseReadConfigurationResult(
+      JSON.stringify({
+        configuration: { name: 'x' },
+        workspace: { workspaceFolder: '/workspaces/repo/sub', workspaceMount: 'type=bind' },
+      }),
+    );
+    expect(result.configuration).toEqual({ name: 'x' });
+    expect(result.workspace).toEqual({
+      workspaceFolder: '/workspaces/repo/sub',
+      workspaceMount: 'type=bind',
+    });
+    expect(result.mergedConfiguration).toBeUndefined();
+  });
+
+  it('requires a workspace folder', () => {
+    expect(() => parseReadConfigurationResult('{"configuration":{},"workspace":{}}')).toThrowError(
+      /workspaceFolder/,
+    );
+  });
+});

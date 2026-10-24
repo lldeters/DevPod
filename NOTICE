@@ -1,0 +1,28 @@
+Dev Containers for Kiro (Community)
+Copyright 2026 The Dev Containers for Kiro authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This is an independent, community-maintained project. It is not affiliated with, endorsed by,
+or sponsored by Microsoft Corporation or Amazon Web Services. "Visual Studio Code", "VS Code"
+and "Dev Containers" are trademarks of Microsoft Corporation; "Kiro" is a trademark of Amazon
+Web Services. They are used here only to describe compatibility.
+
+This project is a clean-room implementation. It does not contain or derive from the source code
+of Microsoft's proprietary "Dev Containers" (ms-vscode-remote.remote-containers) extension. It
+is built on the public Development Containers specification (https://containers.dev) and on the
+open-source Dev Container CLI.
+
+Third-party software distributed with this product
+--------------------------------------------------
+
+@devcontainers/cli 0.89.0 - MIT License
+  Copyright (c) Microsoft Corporation
+  https://github.com/devcontainers/cli
+  Shipped unmodified inside the extension package at node_modules/@devcontainers/cli,
+  together with its own LICENSE.txt and ThirdPartyNotices.txt.
+
+jsonc-parser 3.3.1 - MIT License
+  Copyright (c) Microsoft
+  https://github.com/microsoft/node-jsonc-parser
+  Bundled into dist/extension.js. Its license text is reproduced in THIRD_PARTY_LICENSES.md.

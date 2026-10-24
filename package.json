@@ -1,0 +1,206 @@
+{
+  "name": "devcontainers-kiro",
+  "displayName": "Dev Containers for Kiro (Community)",
+  "description": "Unofficial, open-source Dev Containers support for the Kiro IDE. Not affiliated with Microsoft or Amazon.",
+  "version": "0.1.0",
+  "publisher": "lldeters",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lldeters/DevPod.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lldeters/DevPod/issues"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "devcontainer",
+    "dev container",
+    "remote",
+    "docker",
+    "podman",
+    "kiro"
+  ],
+  "engines": {
+    "vscode": "^1.103.0",
+    "node": ">=20"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "enabledApiProposals": [
+    "resolvers"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onResolveRemoteAuthority:dev-container",
+    "workspaceContains:.devcontainer/devcontainer.json",
+    "workspaceContains:.devcontainer.json",
+    "workspaceContains:.devcontainer/*/devcontainer.json"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "A dev container runs lifecycle scripts and builds images defined by the workspace. Only open folders you trust."
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "devcontainersKiro.reopenInContainer",
+        "title": "Reopen in Container",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.rebuildAndReopenInContainer",
+        "title": "Rebuild and Reopen in Container",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.rebuildContainer",
+        "title": "Rebuild Container",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.rebuildContainerNoCache",
+        "title": "Rebuild Container Without Cache",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.reopenLocally",
+        "title": "Reopen Folder Locally",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.openConfigFile",
+        "title": "Open Container Configuration File",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.showLog",
+        "title": "Show Log",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.setupRemoteSupport",
+        "title": "Enable Remote Support (proposed API)",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.showContainerMenu",
+        "title": "Show Container Actions",
+        "category": "Kiro Dev Containers"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "devcontainersKiro.reopenInContainer",
+          "when": "!remoteName && workbenchState != empty"
+        },
+        {
+          "command": "devcontainersKiro.rebuildAndReopenInContainer",
+          "when": "!remoteName && workbenchState != empty"
+        },
+        {
+          "command": "devcontainersKiro.rebuildContainer",
+          "when": "remoteName == dev-container"
+        },
+        {
+          "command": "devcontainersKiro.rebuildContainerNoCache",
+          "when": "remoteName == dev-container"
+        },
+        {
+          "command": "devcontainersKiro.reopenLocally",
+          "when": "remoteName == dev-container"
+        },
+        {
+          "command": "devcontainersKiro.openConfigFile",
+          "when": "workbenchState != empty"
+        },
+        {
+          "command": "devcontainersKiro.showContainerMenu",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Dev Containers (Community)",
+      "properties": {
+        "dev.containers.dockerPath": {
+          "type": "string",
+          "default": "docker",
+          "scope": "machine",
+          "markdownDescription": "Path or name of the container engine CLI (`docker` or `podman`)."
+        },
+        "dev.containers.dockerComposePath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path of the Docker Compose CLI. Leave empty to let the Dev Container CLI choose (`docker compose`, then `docker-compose`)."
+        },
+        "dev.containers.devcontainerCliPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to a `devcontainer` executable. Leave empty to use the Dev Container CLI that ships with this extension."
+        },
+        "dev.containers.logLevel": {
+          "type": "string",
+          "enum": [
+            "info",
+            "debug",
+            "trace"
+          ],
+          "default": "info",
+          "markdownDescription": "Verbosity of the **Kiro Dev Containers** output channel and of the Dev Container CLI."
+        },
+        "dev.containers.promptToReopen": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer to reopen a folder in a container when it contains a dev container configuration."
+        },
+        "dev.containers.serverDownloadUrlTemplate": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "URL template for the IDE server that is installed inside the container. Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${release}`, `${os}`, `${arch}`. Leave empty to use `serverDownloadUrlTemplate` from the IDE's `product.json`, if present."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run build -- --production",
+    "test:e2e": "vitest run test/e2e",
+    "test:smoke": "node scripts/smoke-bundle.mjs"
+  },
+  "dependencies": {
+    "@devcontainers/cli": "0.89.0",
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.19.0",
+    "@types/vscode": "1.103.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.39.5",
+    "ovsx": "^0.10.0",
+    "prettier": "^3.6.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^3.2.0"
+  }
+}

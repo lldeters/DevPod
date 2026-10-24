@@ -1,0 +1,51 @@
+// Copyright 2026 The Dev Containers for Kiro authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Minimal declarations for the `resolvers` proposed API, limited to what this extension uses.
+// Signatures follow vscode.proposed.resolvers.d.ts of the VS Code release the IDE is based on
+// (1.103). Proposed APIs can change in any release; compare against the IDE's base version when
+// updating `engines.vscode`.
+import 'vscode';
+
+declare module 'vscode' {
+  export interface ManagedMessagePassing {
+    readonly onDidReceiveMessage: Event<Uint8Array>;
+    readonly onDidClose: Event<Error | undefined>;
+    readonly onDidEnd: Event<void>;
+    send(data: Uint8Array): void;
+    end(): void;
+    drain?(): Thenable<void>;
+  }
+
+  export class ManagedResolvedAuthority {
+    readonly makeConnection: () => Thenable<ManagedMessagePassing>;
+    readonly connectionToken: string | undefined;
+    constructor(makeConnection: () => Thenable<ManagedMessagePassing>, connectionToken?: string);
+  }
+
+  export interface RemoteAuthorityResolverContext {
+    readonly resolveAttempt: number;
+  }
+
+  export type ResolverResult = ManagedResolvedAuthority;
+
+  export interface RemoteAuthorityResolver {
+    resolve(
+      authority: string,
+      context: RemoteAuthorityResolverContext,
+    ): ResolverResult | Thenable<ResolverResult>;
+  }
+
+  export class RemoteAuthorityResolverError extends Error {
+    static NotAvailable(message?: string, handled?: boolean): RemoteAuthorityResolverError;
+    static TemporarilyNotAvailable(message?: string): RemoteAuthorityResolverError;
+    constructor(message?: string);
+  }
+
+  export namespace workspace {
+    export function registerRemoteAuthorityResolver(
+      authorityPrefix: string,
+      resolver: RemoteAuthorityResolver,
+    ): Disposable;
+  }
+}

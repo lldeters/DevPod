@@ -1,0 +1,11 @@
+**
+!dist/extension.js
+!package.json
+!README.md
+!LICENSE
+!NOTICE
+!THIRD_PARTY_LICENSES.md
+!CHANGELOG.md
+!media/**
+!node_modules/@devcontainers/cli/**
+!node_modules/jsonc-parser/package.json

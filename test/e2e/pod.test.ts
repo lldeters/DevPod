@@ -120,6 +120,7 @@ describe.skipIf(!enabled)('Kubernetes pod end to end', () => {
       containerId: `${ref.namespace}/${ref.pod}`,
       urlTemplate: 'file:///tmp/server.tar.gz',
       extensions: ['esbenp.prettier-vscode'],
+      kiroLogin: '{"accessToken":"e2e-login"}',
       build: {
         commit: 'k8se2e',
         quality: 'stable',
@@ -143,6 +144,21 @@ describe.skipIf(!enabled)('Kubernetes pod end to end', () => {
       expect.arrayContaining(['--start-server', '--install-extension', 'esbenp.prettier-vscode']),
     );
     expect(args).not.toContain(server.token);
+
+    // the Kiro sign-in landed in the home directory of the pod user, private to that user
+    const login = execFileSync(
+      'kubectl',
+      [
+        'exec',
+        POD,
+        '--',
+        'sh',
+        '-c',
+        'cat "$HOME/.aws/sso/cache/kiro-auth-token.json"; stat -c "%a" "$HOME/.aws/sso/cache/kiro-auth-token.json"',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(login.trim().split('\n')).toEqual(['{"accessToken":"e2e-login"}', '600']);
 
     // a second call reuses the running server
     expect(await provisionServer(executor, input, logger)).toEqual(server);

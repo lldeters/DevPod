@@ -208,6 +208,7 @@ describe.skipIf(!enabled)('dev container end to end', () => {
         urlTemplate: 'file:///tmp/server.tar.gz',
         extensions: custom.extensions,
         settings: { ...portsAttributesSettings(config), ...custom.settings },
+        kiroLogin: '{"accessToken":"e2e-login"}',
         build: {
           commit: 'e2ecommit2',
           quality: 'stable',
@@ -240,6 +241,18 @@ describe.skipIf(!enabled)('dev container end to end', () => {
       'remote.portsAttributes': { '3000': { label: 'App', onAutoForward: 'notify' } },
       'editor.tabSize': 3,
     });
+
+    // the Kiro sign-in landed in the home directory of the remote user, private to that user
+    const login = await engine.exec({
+      containerId,
+      user: 'node',
+      command: [
+        'sh',
+        '-c',
+        'cat "$HOME/.aws/sso/cache/kiro-auth-token.json"; stat -c "%a %U" "$HOME/.aws/sso/cache/kiro-auth-token.json"',
+      ],
+    });
+    expect(login.stdout.trim().split('\n')).toEqual(['{"accessToken":"e2e-login"}', '600 node']);
 
     // a port of the container can be reached from this machine through a tunnel
     const tunnel = await openTunnel(

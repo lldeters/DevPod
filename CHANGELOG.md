@@ -24,6 +24,9 @@ First experimental version.
   forwarding. The IDE server falls back to `/tmp` when the home directory is not writable.
 - Port forwarding: `forwardPorts` are forwarded on start and the IDE's own forwards (Ports view,
   automatic detection) are tunneled to localhost; supports `"service:port"` for Compose.
+- Opt-in `dev.containers.shareKiroLogin`: copies this machine's Kiro sign-in
+  (`~/.aws/sso/cache/kiro-auth-token.json`) into containers and pods, so Kiro there does not ask to
+  sign in again. Off by default, user settings only, never replaces an existing sign-in.
 - The log starts with the version and build (commit hash); diagnostics contain it too.
 - Port forwards requested by the IDE, their failures and the first refused connection per tunnel
   are written to the log.

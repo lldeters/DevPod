@@ -21,6 +21,8 @@ export interface PodResolverDependencies {
   kubectlPath: () => string;
   serverBuild: () => Promise<ServerBuildInfo>;
   serverUrlTemplate: () => string | undefined;
+  /** This machine's Kiro sign-in to place in the pod, or `undefined` if it is not shared. */
+  kiroLogin: () => Promise<string | undefined>;
 }
 
 /**
@@ -94,6 +96,7 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
             containerId: target.label,
             build,
             urlTemplate: this.deps.serverUrlTemplate(),
+            kiroLogin: await this.deps.kiroLogin(),
           },
           logger,
           abort.signal,

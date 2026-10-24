@@ -432,6 +432,46 @@ Containers“** und die Ausgabe von `kubectl get pod <name> -o wide`. Zum Aufrä
 
 ---
 
+## Schritt 12: Anmeldung automatisch in Container und Pods übernehmen
+
+Ohne diese Funktion fragt Kiro in jedem neuen Container oder Pod nach einer Anmeldung. Mit ihr
+kopiert die Extension beim Verbinden deine lokale Anmeldedatei
+(`~/.aws/sso/cache/kiro-auth-token.json`) ins Home-Verzeichnis des Containers oder Pods. Die
+Funktion ist **standardmäßig aus**.
+
+### 12a: Einschalten
+
+1. Installiere die neueste Version aus dem **neuesten grünen Lauf** (wie in 10a) und starte Kiro neu.
+2. **Datei → Einstellungen → Einstellungen** (oder Strg+,), im Reiter **Benutzer** nach
+   `shareKiroLogin` suchen und **„Dev › Containers: Share Kiro Login“** anhaken. Die Einstellung
+   gibt es nur in den Benutzer-Einstellungen, nicht pro Projekt.
+3. Wenn die Einstellung fehlt: Ist der Ordner im Eingeschränkten Modus (Schritt 6)?
+
+### 12b: Prüfen
+
+- [ ] Öffne ein Projekt in einem **neuen** Container (zum Beispiel ein neues Testprojekt) oder hänge
+      dich an einen **neu gestarteten** Pod an. Kiro fragt **nicht** nach der Anmeldung.
+- [ ] Im Protokoll (Ansicht → Ausgabe → „Kiro Dev Containers“) steht
+      `Copied the Kiro sign-in of this machine into the container.` Beim zweiten Verbinden mit
+      demselben Container steht `The container already has a Kiro sign-in; it was left unchanged.`
+- [ ] **Wichtig:** Bleibst du auf deinem Rechner angemeldet? Prüfe das nach ein paar Stunden und
+      nachdem du im Container mit Kiro gearbeitet hast. Kiro erneuert die Anmeldung regelmäßig. Wenn
+      es dabei den Erneuerungs-Schlüssel austauscht, kann die eine Seite die andere abmelden. Das
+      ist die Frage, die ich noch nicht beantworten kann.
+- [ ] Schalte die Einstellung wieder aus und öffne einen weiteren neuen Container: Es wird nichts
+      kopiert, und Kiro fragt nach der Anmeldung.
+
+### 12c: Wieder entfernen
+
+Im Terminal des Containers: `rm ~/.aws/sso/cache/kiro-auth-token.json`, oder in Kiro dort abmelden.
+
+**Bedenke:** Die kopierte Datei ist ein Zugangsdatum im Container oder Pod. Jeder, der dort Befehle
+ausführen darf, kann sie lesen (bei einer Anmeldung im Container ist das genauso). Aktiviere die
+Funktion deshalb nicht für Pods in einem Cluster, den du dir mit anderen teilst, wenn dir das nicht
+recht ist.
+
+---
+
 ## Entscheidung: Name und Publisher (kann warten)
 
 Für den Test musst du **nichts** entscheiden. Später, wenn die Extension auf Open VSX

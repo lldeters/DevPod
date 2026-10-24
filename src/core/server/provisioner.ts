@@ -7,6 +7,7 @@ import type { Logger } from '../logger';
 import type { RunResult } from '../process';
 import { detectPlatformScript, parsePlatform } from './platform';
 import type { ServerBuildInfo } from './productInfo';
+import { buildShareLoginScript, parseShareLoginResult } from './kiroLogin';
 import {
   buildReadSettingsScript,
   buildWriteSettingsScript,
@@ -33,6 +34,11 @@ export interface ProvisionInput {
   extensions?: readonly string[] | undefined;
   /** Settings for the container's machine settings; merged into what is already there. */
   settings?: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * Content of this machine's Kiro sign-in file, to be placed in the container's home directory
+   * unless it already has one. Absent when the user does not share the sign-in.
+   */
+  kiroLogin?: string | undefined;
 }
 
 export const MISSING_TEMPLATE_MESSAGE =
@@ -60,8 +66,16 @@ async function runShell(
     if (what === 'install' && result.stdout.includes('error==')) {
       return result.stdout;
     }
-    const detail = (result.stderr || result.stdout).trim().split('\n').slice(-5).join('\n');
-    const action = { install: 'set up the server', settings: 'write settings' }[what];
+    // Never echo output while copying the sign-in: it must not end up in a message or a log.
+    const detail =
+      what === 'login'
+        ? ''
+        : (result.stderr || result.stdout).trim().split('\n').slice(-5).join('\n');
+    const action = {
+      install: 'set up the server',
+      settings: 'write settings',
+      login: 'copy the Kiro sign-in',
+    }[what];
     throw new DevContainerError(
       'SERVER_INSTALL_FAILED',
       `Could not ${action ?? 'inspect the container'} (exit code ${result.code ?? 'unknown'}).${
@@ -114,6 +128,41 @@ async function syncMachineSettings(
 }
 
 /**
+ * Places this machine's Kiro sign-in in the container, so Kiro there does not ask to sign in again.
+ * An existing file is never replaced, and nothing is copied back. The content is never logged. A
+ * problem is logged and does not stop the connection (unless the operation was cancelled).
+ */
+async function shareKiroLogin(
+  executor: ServerExecutor,
+  input: ProvisionInput,
+  text: string,
+  logger: Logger,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  try {
+    const output = await runShell(executor, input, buildShareLoginScript(text), 'login', signal);
+    const result = parseShareLoginResult(output);
+    logger.log(
+      result === 'nohome' ? 'warn' : 'info',
+      {
+        copied: 'Copied the Kiro sign-in of this machine into the container.',
+        exists: 'The container already has a Kiro sign-in; it was left unchanged.',
+        nohome:
+          'The container user has no writable home directory, so the Kiro sign-in was not copied.',
+      }[result],
+    );
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    logger.log(
+      'warn',
+      `Could not copy the Kiro sign-in: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
  * Makes sure a server matching the IDE is installed and running inside the container, and returns
  * how to reach it. Safe to call repeatedly: an installed, running server is reused.
  */
@@ -135,6 +184,10 @@ export async function provisionServer(
 
   if (input.settings && Object.keys(input.settings).length > 0) {
     await syncMachineSettings(executor, input, platform.home, input.settings, logger, signal);
+  }
+
+  if (input.kiroLogin) {
+    await shareKiroLogin(executor, input, input.kiroLogin, logger, signal);
   }
 
   const downloadUrl = expandUrlTemplate(template, {

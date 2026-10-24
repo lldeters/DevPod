@@ -93,6 +93,7 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | `dev.containers.serverDownloadUrlTemplate` | empty    | Where to download the IDE server (see above).                             |
 | `dev.containers.kubectlPath`               | empty    | `kubectl` for pods; else the Kubernetes extension's, else `PATH`.         |
 | `dev.containers.kubeconfigPath`            | empty    | kubeconfig for pods; else the Kubernetes extension's, else kubectl's own. |
+| `dev.containers.shareKiroLogin`            | `false`  | Copy this machine's Kiro sign-in into containers and pods (see below).    |
 
 ## Kubernetes pods
 
@@ -124,6 +125,25 @@ Google or GitHub sends the browser to `http://localhost:3128`, where a service *
 container** waits for the answer. The extension forwards that port to the same port number on your
 machine, so it must be free there. If the sign-in fails, the log (_Kiro Dev Containers_) shows
 whether the port was requested and forwarded; see `docs/ANLEITUNG-KIRO-TEST.md`, step 10e.
+
+### Skipping the sign-in: `dev.containers.shareKiroLogin`
+
+Kiro keeps its sign-in in `~/.aws/sso/cache/kiro-auth-token.json`. With
+`dev.containers.shareKiroLogin` enabled (off by default, user settings only), the extension copies
+that file from your machine into the home directory of the container user, or of the pod's
+container user, when you connect. Kiro there then does not ask to sign in. Be aware of what this
+means:
+
+- The copy is a credential **inside the container or pod**. Everyone who can run commands there can
+  read it, the same as after a sign-in made in the container.
+- An existing sign-in in the container is never replaced, and nothing is copied back.
+- The copy shares one session with this machine. If Kiro rotates the refresh token when it renews
+  the sign-in (not confirmed), a renewal on one side can sign out the other.
+- To remove it, run `rm ~/.aws/sso/cache/kiro-auth-token.json` in the container, or sign out in
+  Kiro there.
+
+Verified so far: Kiro in a pod accepted a file copied there by hand. The setting itself has been
+tested automatically (including real containers and pods in CI) but not yet in Kiro.
 
 ## Security
 

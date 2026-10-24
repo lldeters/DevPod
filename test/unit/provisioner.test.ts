@@ -232,3 +232,89 @@ describe('provisionServer with extensions and settings', () => {
     ).rejects.toMatchObject({ code: 'SERVER_UNSUPPORTED' });
   });
 });
+
+describe('provisionServer with the Kiro sign-in', () => {
+  const login = '{"accessToken":"SECRET-ACCESS"}';
+  const copied = ok('copied\n');
+
+  it('copies the sign-in as the remote user after the platform check and before the install', async () => {
+    const executor = fakeExecutor([platformOut, copied, installOut]);
+    const logger = new MemoryLogger();
+    await provisionServer(
+      executor,
+      { containerId: 'c1', user: 'vscode', build, kiroLogin: login },
+      logger,
+    );
+    expect(executor.calls).toHaveLength(3);
+    expect(executor.calls[1]).toMatchObject({ user: 'vscode', command: ['sh', '-s'] });
+    expect(executor.calls[1]?.stdin).toContain(login);
+    expect(executor.calls[1]?.stdin).toContain('kiro-auth-token.json');
+    expect(executor.calls[2]?.stdin).toContain('DOWNLOAD_URL=');
+    expect(logger.entries).toContainEqual({
+      level: 'info',
+      message: 'Copied the Kiro sign-in of this machine into the container.',
+    });
+  });
+
+  it('does nothing when the sign-in is not shared', async () => {
+    const executor = fakeExecutor([platformOut, installOut]);
+    await provisionServer(executor, { containerId: 'c1', user: 'u', build }, new MemoryLogger());
+    expect(executor.calls.map((call) => call.stdin).join('\n')).not.toContain('kiro-auth-token');
+  });
+
+  it.each([
+    ['exists', 'info', 'already has a Kiro sign-in'],
+    ['nohome', 'warn', 'no writable home directory'],
+  ])('reports %s', async (answer, level, text) => {
+    const executor = fakeExecutor([platformOut, ok(`${answer}\n`), installOut]);
+    const logger = new MemoryLogger();
+    await provisionServer(
+      executor,
+      { containerId: 'c1', user: 'u', build, kiroLogin: login },
+      logger,
+    );
+    const entry = logger.entries.find((e) => e.message.includes(text));
+    expect(entry?.level).toBe(level);
+  });
+
+  it('keeps going and warns when copying fails, without leaking the content', async () => {
+    const failed: RunResult = {
+      code: 1,
+      signal: null,
+      stdout: `SECRET-ACCESS ${login}`,
+      stderr: `sh: SECRET-ACCESS ${login}`,
+    };
+    const executor = fakeExecutor([platformOut, failed, installOut]);
+    const logger = new MemoryLogger();
+    const result = await provisionServer(
+      executor,
+      { containerId: 'c1', user: 'u', build, kiroLogin: login },
+      logger,
+    );
+    expect(result.port).toBe(41000);
+    const warning = logger.entries.find((e) => e.level === 'warn');
+    expect(warning?.message).toContain('Could not copy the Kiro sign-in');
+    expect(JSON.stringify(logger.entries)).not.toContain('SECRET-ACCESS');
+  });
+
+  it('stops when the operation was cancelled while copying', async () => {
+    const controller = new AbortController();
+    const executor: ServerExecutor = {
+      exec: (options) => {
+        if (options.stdin?.includes('kiro-auth-token')) {
+          controller.abort();
+          return Promise.reject(new Error('aborted'));
+        }
+        return Promise.resolve(platformOut);
+      },
+    };
+    await expect(
+      provisionServer(
+        executor,
+        { containerId: 'c1', user: 'u', build, kiroLogin: login },
+        new MemoryLogger(),
+        controller.signal,
+      ),
+    ).rejects.toThrow('aborted');
+  });
+});

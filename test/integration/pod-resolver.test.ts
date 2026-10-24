@@ -10,6 +10,7 @@ import {
   readFile,
   realpath,
   rm,
+  stat,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -115,9 +116,13 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         // no server was started
       }
       await rm(path.join(home, '.pod-test-server'), { recursive: true, force: true });
+      await rm(path.join(home, '.aws'), { recursive: true, force: true });
     });
 
-    function createResolver(): { resolver: PodResolver; logger: MemoryLogger } {
+    function createResolver(options: { kiroLogin?: string } = {}): {
+      resolver: PodResolver;
+      logger: MemoryLogger;
+    } {
       const logger = new MemoryLogger();
       const resolver = new PodResolver({
         logger,
@@ -128,6 +133,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         kubectlPath: () => stub.path,
         serverBuild: async () => build,
         serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => options.kiroLogin,
       });
       cleanups.push(() => resolver.dispose());
       return { resolver, logger };
@@ -234,6 +240,40 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       await tunnel.dispose();
     });
 
+    describe('sharing the Kiro sign-in', () => {
+      const loginFile = () => path.join(home, '.aws', 'sso', 'cache', 'kiro-auth-token.json');
+      const login = '{"accessToken":"SECRET-ACCESS"}';
+
+      it('copies it into the pod through kubectl exec, privately and only once', async () => {
+        const { resolver, logger } = createResolver({ kiroLogin: login });
+        await resolver.resolve(encodePodAuthority(ref));
+
+        expect((await readFile(loginFile(), 'utf8')).trim()).toBe(login);
+        expect((await stat(loginFile())).mode & 0o777).toBe(0o600);
+        expect(logger.entries.map((e) => e.message)).toContain(
+          'Copied the Kiro sign-in of this machine into the container.',
+        );
+
+        // a later connection never replaces what the pod has
+        await writeFile(loginFile(), '{"fresher":"login made in the pod"}');
+        const again = createResolver({ kiroLogin: login });
+        await again.resolver.resolve(encodePodAuthority(ref));
+        expect(await readFile(loginFile(), 'utf8')).toBe('{"fresher":"login made in the pod"}');
+        expect(again.logger.entries.map((e) => e.message)).toContain(
+          'The container already has a Kiro sign-in; it was left unchanged.',
+        );
+        expect(JSON.stringify([...logger.entries, ...again.logger.entries])).not.toContain(
+          'SECRET-ACCESS',
+        );
+      });
+
+      it('leaves the pod alone unless the sign-in is shared', async () => {
+        const { resolver } = createResolver();
+        await resolver.resolve(encodePodAuthority(ref));
+        await expect(stat(loginFile())).rejects.toThrow();
+      });
+    });
+
     it('refuses tunnels before the pod is attached', async () => {
       const { resolver } = createResolver();
       await expect(
@@ -300,6 +340,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         kubectlPath: () => path.join(root, 'no-such-kubectl'),
         serverBuild: async () => build,
         serverUrlTemplate: () => undefined,
+        kiroLogin: async () => undefined,
       });
       await expect(resolver.resolve(encodePodAuthority(ref))).rejects.toMatchObject({
         message: expect.stringMatching(/Install kubectl or set "dev\.containers\.kubectlPath"/),

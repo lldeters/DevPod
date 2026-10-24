@@ -60,6 +60,15 @@ Features contribute. From it the resolver reads:
   rewritten. The text is written through a quoted here-document with a random delimiter. A problem
   here is logged and does not stop the connection. `portsAttributes` and `otherPortsAttributes` use
   the same shape as `remote.portsAttributes` / `remote.otherPortsAttributes` and travel the same way.
+- **Kiro sign-in** (`src/core/server/kiroLogin.ts`, opt-in setting `dev.containers.shareKiroLogin`,
+  scope `application` so a workspace cannot switch it on). The file `~/.aws/sso/cache/kiro-auth-token.json`
+  of this machine is read when the setting is on, checked to be a small JSON object, and written by
+  a `sh -s` script (content on stdin through a quoted here-document, so never in an argument list)
+  to `$HOME` of the exec user in the container or pod, right after the platform check. The script
+  uses the real `$HOME`, not the `/tmp` fallback the server may live in, and writes nothing without
+  a writable one; it creates 700/600 files like Kiro does, and never replaces a non-empty file. A
+  problem is logged and does not stop the connection. The content is never logged, and the error
+  text of this step contains no command output.
 - **Ports.** `resolver.tunnelFactory` is called by the IDE for every forward. It is an arrow
   function property: the IDE stores the function and calls it detached from the resolver
   (`this._forwardPortProvider(...)` in `extHostTunnelService.ts`), so a prototype method would find

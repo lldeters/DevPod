@@ -12,6 +12,7 @@ export interface Settings {
   serverDownloadUrlTemplate: string | undefined;
   kubectlPath: string | undefined;
   kubeconfigPath: string | undefined;
+  shareKiroLogin: boolean;
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -30,5 +31,6 @@ export function readSettings(): Settings {
     serverDownloadUrlTemplate: nonEmpty(config.get<string>('serverDownloadUrlTemplate')),
     kubectlPath: nonEmpty(config.get<string>('kubectlPath')),
     kubeconfigPath: nonEmpty(config.get<string>('kubeconfigPath')),
+    shareKiroLogin: config.get<boolean>('shareKiroLogin') ?? false,
   };
 }

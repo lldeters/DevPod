@@ -220,6 +220,12 @@
           "default": "",
           "scope": "machine",
           "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods. Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
+        },
+        "dev.containers.shareKiroLogin": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Copy this machine's Kiro sign-in (`~/.aws/sso/cache/kiro-auth-token.json`) into every container and pod you open, so Kiro does not ask to sign in again there. An existing sign-in in the container is never replaced and nothing is copied back. **The copy is a credential in the container:** everyone who can run commands there can read it, and it shares one session with this machine, so a token refresh on one side may sign out the other. Can only be set in the user settings."
         }
       }
     }

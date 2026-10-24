@@ -28,6 +28,8 @@ export interface ResolverDependencies {
   rebuilds: RebuildRequests;
   serverBuild: () => Promise<ServerBuildInfo>;
   serverUrlTemplate: () => string | undefined;
+  /** This machine's Kiro sign-in to place in the container, or `undefined` if it is not shared. */
+  kiroLogin: () => Promise<string | undefined>;
 }
 
 function progressText(event: CliLogEvent): string | undefined {
@@ -148,6 +150,7 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
             urlTemplate: this.deps.serverUrlTemplate(),
             extensions: customizations.extensions,
             settings: { ...portsAttributesSettings(config), ...customizations.settings },
+            kiroLogin: await this.deps.kiroLogin(),
           },
           logger,
           abort.signal,

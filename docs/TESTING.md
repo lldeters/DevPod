@@ -73,6 +73,16 @@ Use `docs/ANLEITUNG-KIRO-TEST.md`, step 10, which has a ready-made project.
 - [ ] `portsAttributes` labels show in the Ports view.
 - [ ] Signing in to Kiro in the container window works (`docs/ANLEITUNG-KIRO-TEST.md`, step 10e).
 
+### 6b. Sharing the Kiro sign-in
+
+Enable `dev.containers.shareKiroLogin` in the user settings first.
+
+- [ ] A new container or pod window starts without asking to sign in; the log says _Copied the Kiro
+      sign-in of this machine into the container._
+- [ ] Sign-in on this machine is still valid afterwards, also after Kiro in the container renewed its
+      copy (this shows whether renewal signs out the other side).
+- [ ] With the setting off, nothing is copied.
+
 ### 7. Kubernetes pods
 
 Use `docs/ANLEITUNG-KIRO-TEST.md`, step 11, which has a ready-made pod.

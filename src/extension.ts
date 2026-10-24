@@ -1,6 +1,7 @@
 // Copyright 2026 The Dev Containers for Kiro authors
 // SPDX-License-Identifier: Apache-2.0
 
+import * as os from 'node:os';
 import * as vscode from 'vscode';
 import { BUILD_ID } from './buildInfo';
 import { AUTHORITY_PREFIX } from './core/authority';
@@ -9,6 +10,7 @@ import { ContainerEngine } from './core/engine/containerEngine';
 import { errorMessage } from './core/errors';
 import { Kubectl } from './core/k8s/kubectl';
 import { POD_AUTHORITY_PREFIX } from './core/k8s/podRef';
+import { readLocalLoginFile } from './core/server/kiroLogin';
 import { PodResolver } from './remote/podResolver';
 import { readServerBuildInfo } from './remote/product';
 import { RebuildRequests } from './remote/rebuildRequests';
@@ -51,6 +53,12 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
   const rebuilds = new RebuildRequests(context.globalState);
+
+  // The sign-in is read for every connection, and only when the user has chosen to share it.
+  const kiroLogin = async (): Promise<string | undefined> =>
+    readSettings().shareKiroLogin
+      ? readLocalLoginFile(os.homedir(), (message) => logger.log('warn', message))
+      : undefined;
   const remoteSupport = new RemoteSupport();
 
   // The resolver API is a proposed API: registering fails unless the IDE was told to allow it.
@@ -61,6 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
     rebuilds,
     serverBuild: readServerBuildInfo,
     serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
+    kiroLogin,
   });
   context.subscriptions.push(resolver);
 
@@ -71,6 +80,7 @@ export function activate(context: vscode.ExtensionContext): void {
     kubectlPath: effectiveKubectlPath,
     serverBuild: readServerBuildInfo,
     serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
+    kiroLogin,
   });
   context.subscriptions.push(podResolver);
 

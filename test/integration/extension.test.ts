@@ -297,6 +297,7 @@ describe('DevContainerResolver', () => {
       rebuilds,
       serverBuild: async () => build,
       serverUrlTemplate: () => undefined,
+      kiroLogin: async () => undefined,
     });
     return { resolver, rebuilds, upCalls };
   }
@@ -481,7 +482,10 @@ child.on('exit', (code) => process.exit(code ?? 1));
     });
   }
 
-  function setup(mergedConfiguration: Record<string, unknown>) {
+  function setup(
+    mergedConfiguration: Record<string, unknown>,
+    options: { kiroLogin?: string } = {},
+  ) {
     const scripts: string[] = [];
     let settingsFile = '';
     const logger = new MemoryLogger();
@@ -502,6 +506,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
         scripts.push(script);
         if (script.includes(`${PLATFORM_MARKER}: start`)) return platform;
         if (script.includes(`${INSTALL_MARKER}: start`)) return installed;
+        if (script.includes('kiro-auth-token.json')) return ok('copied\n');
         if (script.startsWith('cat ')) return ok(settingsFile);
         const heredoc = /<<'(DCK_[0-9a-f]+)'\n([\s\S]*?)\n\1\n/.exec(script);
         if (heredoc) settingsFile = `${heredoc[2]}\n`;
@@ -515,6 +520,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
       rebuilds: new RebuildRequests(new mock.MockMemento() as unknown as vscode.Memento),
       serverBuild: async () => build,
       serverUrlTemplate: () => undefined,
+      kiroLogin: async () => options.kiroLogin,
     });
     cleanups.push(() => resolver.dispose());
     return { resolver, scripts, logger, settings: () => JSON.parse(settingsFile || '{}') };
@@ -557,6 +563,28 @@ child.on('exit', (code) => process.exit(code ?? 1));
     await resolver.resolve(authority());
     expect(scripts).toHaveLength(2); // platform + install; no settings, no extensions
     expect(scripts[1]).not.toContain('--install-extension');
+  });
+
+  it('copies the Kiro sign-in into the container when it is shared, before the server starts', async () => {
+    const login = '{"accessToken":"SECRET-ACCESS"}';
+    const { resolver, scripts, logger } = setup({}, { kiroLogin: login });
+    await resolver.resolve(authority());
+
+    const copy = scripts.findIndex((script) => script.includes('kiro-auth-token.json'));
+    const install = scripts.findIndex((script) => script.includes(`${INSTALL_MARKER}: start`));
+    expect(copy).toBeGreaterThan(-1);
+    expect(copy).toBeLessThan(install);
+    expect(scripts[copy]).toContain(login);
+    expect(logger.entries.map((e) => e.message)).toContain(
+      'Copied the Kiro sign-in of this machine into the container.',
+    );
+    expect(JSON.stringify(logger.entries)).not.toContain('SECRET-ACCESS');
+  });
+
+  it('does not copy the Kiro sign-in unless it is shared', async () => {
+    const { resolver, scripts } = setup({});
+    await resolver.resolve(authority());
+    expect(scripts.some((script) => script.includes('kiro-auth-token.json'))).toBe(false);
   });
 
   it('forwards the configured ports and reports them as already forwarded', async () => {

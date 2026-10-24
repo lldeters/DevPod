@@ -36,6 +36,28 @@ describe('BRIDGE_SCRIPT', () => {
     expect(Buffer.concat(chunks).equals(payload)).toBe(true);
   });
 
+  it('delivers everything to a slow reader when the server closes right after writing', async () => {
+    const size = 256 * 1024;
+    server = net.createServer((socket) => socket.end(Buffer.alloc(size, 97)));
+    const port = await new Promise<number>((resolve) =>
+      server?.listen(0, '127.0.0.1', () => resolve((server?.address() as net.AddressInfo).port)),
+    );
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const child = spawn(process.execPath, ['-e', BRIDGE_SCRIPT, String(port)], {
+        stdio: ['pipe', 'pipe', 'inherit'],
+      });
+      let received = 0;
+      child.stdout.on('data', (chunk: Buffer) => {
+        received += chunk.length;
+        child.stdout.pause();
+        setTimeout(() => child.stdout.resume(), 2);
+      });
+      const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
+      expect(code).toBe(0);
+      expect(received).toBe(size);
+    }
+  });
+
   it('exits non-zero when nothing listens on the port', async () => {
     const port = await listenEcho();
     server?.close();

@@ -229,7 +229,9 @@ export const BRIDGE_SCRIPT = [
   'const socket = net.connect(port, host);',
   'process.stdin.pipe(socket);',
   'socket.pipe(process.stdout);',
-  "socket.on('close', () => process.exit(0));",
+  // Exit only once stdout has taken everything: exiting right away drops what is still buffered,
+  // which cuts off the end of a response when a slow reader is attached.
+  "socket.on('close', () => process.stdout.write('', () => process.exit(0)));",
   "socket.on('error', () => process.exit(1));",
   "process.stdin.on('end', () => socket.end());",
 ].join('\n');

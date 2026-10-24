@@ -256,6 +256,61 @@ describe('provisionServer with the Kiro sign-in', () => {
     });
   });
 
+  it('asks first when asked to, only if the container has no sign-in, and copies on "yes"', async () => {
+    const questions: string[] = [];
+    const confirm = async (): Promise<boolean> => {
+      questions.push('asked');
+      return true;
+    };
+    const executor = fakeExecutor([platformOut, ok('missing\n'), copied, installOut]);
+    await provisionServer(
+      executor,
+      { containerId: 'c1', user: 'u', build, kiroLogin: login, confirmKiroLogin: confirm },
+      new MemoryLogger(),
+    );
+    expect(questions).toHaveLength(1);
+    expect(executor.calls[1]?.stdin).not.toContain(login); // the check carries no secret
+    expect(executor.calls[2]?.stdin).toContain(login);
+  });
+
+  it('copies nothing when the user says no', async () => {
+    const executor = fakeExecutor([platformOut, ok('missing\n'), installOut]);
+    const logger = new MemoryLogger();
+    await provisionServer(
+      executor,
+      {
+        containerId: 'c1',
+        user: 'u',
+        build,
+        kiroLogin: login,
+        confirmKiroLogin: async () => false,
+      },
+      logger,
+    );
+    expect(executor.calls.map((call) => call.stdin).join('\n')).not.toContain(login);
+    expect(logger.entries.map((e) => e.message)).toContain(
+      'The Kiro sign-in was not copied into the container (not confirmed).',
+    );
+  });
+
+  it.each(['exists', 'nohome'])('does not ask when the container answers %s', async (answer) => {
+    let asked = false;
+    const executor = fakeExecutor([platformOut, ok(`${answer}\n`), installOut]);
+    await provisionServer(
+      executor,
+      {
+        containerId: 'c1',
+        user: 'u',
+        build,
+        kiroLogin: login,
+        confirmKiroLogin: async () => (asked = true),
+      },
+      new MemoryLogger(),
+    );
+    expect(asked).toBe(false);
+    expect(executor.calls).toHaveLength(3);
+  });
+
   it('does nothing when the sign-in is not shared', async () => {
     const executor = fakeExecutor([platformOut, installOut]);
     await provisionServer(executor, { containerId: 'c1', user: 'u', build }, new MemoryLogger());

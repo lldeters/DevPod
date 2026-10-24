@@ -3,6 +3,9 @@
 
 import * as vscode from 'vscode';
 
+/** Whether this machine's Kiro sign-in is copied into containers and pods. */
+export type ShareKiroLogin = 'ask' | 'always' | 'never';
+
 export interface Settings {
   dockerPath: string;
   dockerComposePath: string | undefined;
@@ -12,12 +15,19 @@ export interface Settings {
   serverDownloadUrlTemplate: string | undefined;
   kubectlPath: string | undefined;
   kubeconfigPath: string | undefined;
-  shareKiroLogin: boolean;
+  shareKiroLogin: ShareKiroLogin;
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+/** Up to 0.1.0 the setting was a boolean; those values keep their meaning. */
+function shareKiroLogin(value: unknown): ShareKiroLogin {
+  if (value === true) return 'always';
+  if (value === false) return 'never';
+  return value === 'always' || value === 'never' ? value : 'ask';
 }
 
 export function readSettings(): Settings {
@@ -31,6 +41,6 @@ export function readSettings(): Settings {
     serverDownloadUrlTemplate: nonEmpty(config.get<string>('serverDownloadUrlTemplate')),
     kubectlPath: nonEmpty(config.get<string>('kubectlPath')),
     kubeconfigPath: nonEmpty(config.get<string>('kubeconfigPath')),
-    shareKiroLogin: config.get<boolean>('shareKiroLogin') ?? true,
+    shareKiroLogin: shareKiroLogin(config.get<unknown>('shareKiroLogin')),
   };
 }

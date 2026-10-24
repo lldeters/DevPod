@@ -61,9 +61,14 @@ describe('manifest', () => {
     );
   });
 
-  it('shares the Kiro sign-in by default, switchable only in the user settings', () => {
+  it('asks before sharing the Kiro sign-in by default, switchable only in the user settings', () => {
     const setting = manifest.contributes.configuration.properties['dev.containers.shareKiroLogin'];
-    expect(setting).toMatchObject({ type: 'boolean', default: true, scope: 'application' });
+    expect(setting).toMatchObject({
+      type: 'string',
+      enum: ['ask', 'always', 'never'],
+      default: 'ask',
+      scope: 'application',
+    });
   });
 
   it('declares the settings the Kubernetes feature reads', () => {

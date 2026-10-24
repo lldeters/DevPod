@@ -17,6 +17,7 @@ import { errorMessage } from '../core/errors';
 import type { Logger } from '../core/logger';
 import type { ServerBuildInfo } from '../core/server/productInfo';
 import { provisionServer } from '../core/server/provisioner';
+import type { KiroLoginShare } from '../core/server/provisioner';
 import { DockerTarget } from '../core/exec/target';
 import { createBridge } from './bridge';
 import { confirmTarget } from './knownTargets';
@@ -33,8 +34,8 @@ export interface ResolverDependencies {
   targets: Pick<KnownTargets, 'has' | 'add'>;
   serverBuild: () => Promise<ServerBuildInfo>;
   serverUrlTemplate: () => string | undefined;
-  /** This machine's Kiro sign-in to place in the container, or `undefined` if it is not shared. */
-  kiroLogin: () => Promise<string | undefined>;
+  /** This machine's Kiro sign-in to offer to the named target, or `undefined` if it is not shared. */
+  kiroLogin: (target: string) => Promise<KiroLoginShare | undefined>;
 }
 
 function progressText(event: CliLogEvent): string | undefined {
@@ -79,6 +80,15 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
 
   dispose(): void {
     this.hub.dispose();
+  }
+
+  private async loginInput(
+    target: string,
+  ): Promise<{ kiroLogin?: string; confirmKiroLogin?: () => Promise<boolean> }> {
+    const share = await this.deps.kiroLogin(target);
+    return share
+      ? { kiroLogin: share.text, ...(share.confirm ? { confirmKiroLogin: share.confirm } : {}) }
+      : {};
   }
 
   private async start(authority: string): Promise<vscode.ResolverResult> {
@@ -164,7 +174,7 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
             urlTemplate: this.deps.serverUrlTemplate(),
             extensions: customizations.extensions,
             settings: { ...portsAttributesSettings(config), ...customizations.settings },
-            kiroLogin: await this.deps.kiroLogin(),
+            ...(await this.loginInput(`the dev container for ${params.hostPath}`)),
           },
           logger,
           abort.signal,

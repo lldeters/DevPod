@@ -559,7 +559,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
       targets: allKnown,
       serverBuild: async () => build,
       serverUrlTemplate: () => undefined,
-      kiroLogin: async () => options.kiroLogin,
+      kiroLogin: async () => (options.kiroLogin ? { text: options.kiroLogin } : undefined),
     });
     cleanups.push(() => resolver.dispose());
     return { resolver, scripts, logger, settings: () => JSON.parse(settingsFile || '{}') };

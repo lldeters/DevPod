@@ -25,6 +25,7 @@ import type { PodRef } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
 import { PodResolver } from '../../src/remote/podResolver';
+import { askToShareKiroLogin } from '../../src/ui/kiroLogin';
 import { callLikeTheIde } from '../helpers/ide';
 import * as mock from '../helpers/vscodeMock';
 import { createKubectlStub, podJson } from '../helpers/kubectlStub';
@@ -123,7 +124,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       await rm(path.join(home, '.aws'), { recursive: true, force: true });
     });
 
-    function createResolver(options: { kiroLogin?: string } = {}): {
+    function createResolver(options: { kiroLogin?: string; ask?: boolean } = {}): {
       resolver: PodResolver;
       logger: MemoryLogger;
     } {
@@ -138,7 +139,13 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         targets: allKnown,
         serverBuild: async () => build,
         serverUrlTemplate: () => `file://${archive}`,
-        kiroLogin: async () => options.kiroLogin,
+        kiroLogin: async (target) =>
+          options.kiroLogin === undefined
+            ? undefined
+            : {
+                text: options.kiroLogin,
+                ...(options.ask ? { confirm: () => askToShareKiroLogin(target) } : {}),
+              },
       });
       cleanups.push(() => resolver.dispose());
       return { resolver, logger };
@@ -270,6 +277,31 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         expect(JSON.stringify([...logger.entries, ...again.logger.entries])).not.toContain(
           'SECRET-ACCESS',
         );
+      });
+
+      it('asks first by default, and copies only when the user agrees', async () => {
+        const declined = createResolver({ kiroLogin: login, ask: true });
+        await declined.resolver.resolve(encodePodAuthority(ref));
+        expect(state.warnings.map((w) => w.message)).toEqual([
+          'Copy your Kiro sign-in into the pod dev/mypod?',
+        ]);
+        await expect(stat(loginFile())).rejects.toThrow();
+        expect(declined.logger.entries.map((e) => e.message)).toContain(
+          'The Kiro sign-in was not copied into the container (not confirmed).',
+        );
+
+        // asked again on the next connection, since the pod still has no sign-in
+        state.answerWarning = (message) =>
+          message.startsWith('Copy your Kiro') ? 'Copy Sign-In' : undefined;
+        const agreed = createResolver({ kiroLogin: login, ask: true });
+        await agreed.resolver.resolve(encodePodAuthority(ref));
+        expect(state.warnings).toHaveLength(2);
+        expect((await readFile(loginFile(), 'utf8')).trim()).toBe(login);
+
+        // no question once the pod has a sign-in
+        const later = createResolver({ kiroLogin: login, ask: true });
+        await later.resolver.resolve(encodePodAuthority(ref));
+        expect(state.warnings).toHaveLength(2);
       });
 
       it('leaves the pod alone unless the sign-in is shared', async () => {

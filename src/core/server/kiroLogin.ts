@@ -104,3 +104,27 @@ export function parseShareLoginResult(stdout: string): 'copied' | 'exists' | 'no
     'Unexpected answer while copying the sign-in.',
   );
 }
+
+/**
+ * Prints whether the container user already has a sign-in (`exists`), has none (`missing`) or has
+ * no writable home directory (`nohome`), by the same rules as the copy script. Used to ask the user
+ * only when a copy would actually be made.
+ */
+export function buildLoginStatusScript(): string {
+  return [
+    'if [ -z "${HOME:-}" ] || [ ! -d "$HOME" ] || [ ! -w "$HOME" ]; then echo nohome; exit 0; fi',
+    `if [ -s "$HOME/${KIRO_LOGIN_RELATIVE_PATH}" ]; then echo exists; else echo missing; fi`,
+    '',
+  ].join('\n');
+}
+
+export function parseLoginStatus(stdout: string): 'exists' | 'missing' | 'nohome' {
+  const last = stdout.trim().split('\n').at(-1)?.trim();
+  if (last === 'exists' || last === 'missing' || last === 'nohome') {
+    return last;
+  }
+  throw new DevContainerError(
+    'SERVER_INSTALL_FAILED',
+    'Unexpected answer while looking for a sign-in in the container.',
+  );
+}

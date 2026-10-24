@@ -7,7 +7,12 @@ import type { Logger } from '../logger';
 import type { RunResult } from '../process';
 import { detectPlatformScript, parsePlatform } from './platform';
 import type { ServerBuildInfo } from './productInfo';
-import { buildShareLoginScript, parseShareLoginResult } from './kiroLogin';
+import {
+  buildLoginStatusScript,
+  buildShareLoginScript,
+  parseLoginStatus,
+  parseShareLoginResult,
+} from './kiroLogin';
 import {
   buildReadSettingsScript,
   buildWriteSettingsScript,
@@ -39,6 +44,17 @@ export interface ProvisionInput {
    * unless it already has one. Absent when the user does not share the sign-in.
    */
   kiroLogin?: string | undefined;
+  /**
+   * Asked before the sign-in is copied, and only if the container has none yet; `false` copies
+   * nothing. Absent when the user shares the sign-in without being asked.
+   */
+  confirmKiroLogin?: (() => Promise<boolean>) | undefined;
+}
+
+/** This machine's Kiro sign-in, and the question to ask before it is copied (if any). */
+export interface KiroLoginShare {
+  readonly text: string;
+  readonly confirm?: (() => Promise<boolean>) | undefined;
 }
 
 export const MISSING_TEMPLATE_MESSAGE =
@@ -127,30 +143,44 @@ async function syncMachineSettings(
   }
 }
 
+const LOGIN_MESSAGES = {
+  copied: 'Copied the Kiro sign-in of this machine into the container.',
+  exists: 'The container already has a Kiro sign-in; it was left unchanged.',
+  nohome: 'The container user has no writable home directory, so the Kiro sign-in was not copied.',
+  declined: 'The Kiro sign-in was not copied into the container (not confirmed).',
+};
+
 /**
  * Places this machine's Kiro sign-in in the container, so Kiro there does not ask to sign in again.
- * An existing file is never replaced, and nothing is copied back. The content is never logged. A
+ * With `confirm`, the user is asked first, and only if the container has no sign-in yet. An
+ * existing file is never replaced, and nothing is copied back. The content is never logged. A
  * problem is logged and does not stop the connection (unless the operation was cancelled).
  */
 async function shareKiroLogin(
   executor: ServerExecutor,
   input: ProvisionInput,
   text: string,
+  confirm: (() => Promise<boolean>) | undefined,
   logger: Logger,
   signal: AbortSignal | undefined,
 ): Promise<void> {
   try {
+    if (confirm) {
+      const status = parseLoginStatus(
+        await runShell(executor, input, buildLoginStatusScript(), 'login', signal),
+      );
+      if (status !== 'missing') {
+        logger.log(status === 'nohome' ? 'warn' : 'info', LOGIN_MESSAGES[status]);
+        return;
+      }
+      if (!(await confirm())) {
+        logger.log('info', LOGIN_MESSAGES.declined);
+        return;
+      }
+    }
     const output = await runShell(executor, input, buildShareLoginScript(text), 'login', signal);
     const result = parseShareLoginResult(output);
-    logger.log(
-      result === 'nohome' ? 'warn' : 'info',
-      {
-        copied: 'Copied the Kiro sign-in of this machine into the container.',
-        exists: 'The container already has a Kiro sign-in; it was left unchanged.',
-        nohome:
-          'The container user has no writable home directory, so the Kiro sign-in was not copied.',
-      }[result],
-    );
+    logger.log(result === 'nohome' ? 'warn' : 'info', LOGIN_MESSAGES[result]);
   } catch (error) {
     if (signal?.aborted) {
       throw error;
@@ -187,7 +217,7 @@ export async function provisionServer(
   }
 
   if (input.kiroLogin) {
-    await shareKiroLogin(executor, input, input.kiroLogin, logger, signal);
+    await shareKiroLogin(executor, input, input.kiroLogin, input.confirmKiroLogin, logger, signal);
   }
 
   const downloadUrl = expandUrlTemplate(template, {

@@ -222,10 +222,20 @@
           "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods. Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
         },
         "dev.containers.shareKiroLogin": {
-          "type": "boolean",
-          "default": true,
+          "type": "string",
+          "enum": [
+            "ask",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Ask on every connection to a container or pod that has no Kiro sign-in yet.",
+            "Copy the sign-in without asking.",
+            "Never copy the sign-in."
+          ],
+          "default": "ask",
           "scope": "application",
-          "markdownDescription": "Copy this machine's Kiro sign-in (`~/.aws/sso/cache/kiro-auth-token.json`) into every container and pod you open, so Kiro does not ask to sign in again there. An existing sign-in in the container is never replaced and nothing is copied back. **The copy is a credential in the container:** everyone who can run commands there can read it, and it shares one session with this machine, so a token refresh on one side may sign out the other. Turn this off if you open containers or pods that others can access. Can only be set in the user settings."
+          "markdownDescription": "Whether this machine's Kiro sign-in (`~/.aws/sso/cache/kiro-auth-token.json`) is copied into the containers and pods you open, so Kiro does not ask to sign in again there. By default you are asked on every connection while the container has no sign-in. An existing sign-in in the container is never replaced and nothing is copied back. **The copy is a credential in the container:** everyone who can run commands there can read it, and it shares one session with this machine, so a token refresh on one side may sign out the other. Can only be set in the user settings."
         }
       }
     }

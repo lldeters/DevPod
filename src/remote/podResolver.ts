@@ -10,6 +10,7 @@ import { decodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
 import type { ServerBuildInfo } from '../core/server/productInfo';
 import { provisionServer } from '../core/server/provisioner';
+import type { KiroLoginShare } from '../core/server/provisioner';
 import { createBridge } from './bridge';
 import { confirmTarget } from './knownTargets';
 import type { KnownTargets } from './knownTargets';
@@ -25,8 +26,8 @@ export interface PodResolverDependencies {
   targets: Pick<KnownTargets, 'has' | 'add'>;
   serverBuild: () => Promise<ServerBuildInfo>;
   serverUrlTemplate: () => string | undefined;
-  /** This machine's Kiro sign-in to place in the pod, or `undefined` if it is not shared. */
-  kiroLogin: () => Promise<string | undefined>;
+  /** This machine's Kiro sign-in to offer to the named target, or `undefined` if it is not shared. */
+  kiroLogin: (target: string) => Promise<KiroLoginShare | undefined>;
 }
 
 /**
@@ -61,6 +62,15 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
 
   dispose(): void {
     this.hub.dispose();
+  }
+
+  private async loginInput(
+    target: string,
+  ): Promise<{ kiroLogin?: string; confirmKiroLogin?: () => Promise<boolean> }> {
+    const share = await this.deps.kiroLogin(target);
+    return share
+      ? { kiroLogin: share.text, ...(share.confirm ? { confirmKiroLogin: share.confirm } : {}) }
+      : {};
   }
 
   private async start(authority: string): Promise<vscode.ResolverResult> {
@@ -110,7 +120,7 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
             containerId: target.label,
             build,
             urlTemplate: this.deps.serverUrlTemplate(),
-            kiroLogin: await this.deps.kiroLogin(),
+            ...(await this.loginInput(`the pod ${ref.namespace}/${ref.pod}`)),
           },
           logger,
           abort.signal,

@@ -1,7 +1,6 @@
 // Copyright 2026 The Dev Containers for Kiro authors
 // SPDX-License-Identifier: Apache-2.0
 
-import * as os from 'node:os';
 import * as vscode from 'vscode';
 import { BUILD_ID } from './buildInfo';
 import { AUTHORITY_PREFIX } from './core/authority';
@@ -10,13 +9,13 @@ import { ContainerEngine } from './core/engine/containerEngine';
 import { errorMessage } from './core/errors';
 import { Kubectl } from './core/k8s/kubectl';
 import { POD_AUTHORITY_PREFIX } from './core/k8s/podRef';
-import { readLocalLoginFile } from './core/server/kiroLogin';
 import { PodResolver } from './remote/podResolver';
 import { readServerBuildInfo } from './remote/product';
 import { KnownTargets } from './remote/knownTargets';
 import { RebuildRequests } from './remote/rebuildRequests';
 import { DevContainerResolver } from './remote/resolver';
 import { registerCommands } from './ui/commands';
+import { kiroLoginFor } from './ui/kiroLogin';
 import { OutputLogger } from './ui/logging';
 import { promptToReopen } from './ui/prompt';
 import { effectiveKubeconfig, effectiveKubectlPath } from './ui/kubernetes';
@@ -56,11 +55,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const rebuilds = new RebuildRequests(context.globalState);
   const targets = new KnownTargets(context.globalState);
 
-  // The sign-in is read for every connection, and only when the user has chosen to share it.
-  const kiroLogin = async (): Promise<string | undefined> =>
-    readSettings().shareKiroLogin
-      ? readLocalLoginFile(os.homedir(), (level, message) => logger.log(level, message))
-      : undefined;
+  // The sign-in is read for every connection, unless the user never shares it; by default the user
+  // is asked before it is copied.
+  const kiroLogin = (target: string) => kiroLoginFor(target, logger);
   const remoteSupport = new RemoteSupport();
 
   // The resolver API is a proposed API: registering fails unless the IDE was told to allow it.

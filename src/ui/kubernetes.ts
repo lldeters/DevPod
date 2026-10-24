@@ -1,6 +1,8 @@
 // Copyright 2026 The Dev Containers for Kiro authors
 // SPDX-License-Identifier: Apache-2.0
 
+import { homedir } from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { errorMessage } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
@@ -41,6 +43,11 @@ function nonEmpty(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
+/** `~/...` as a shell would read it; kubectl is started without a shell, so nothing else does. */
+export function expandHome(file: string): string {
+  return file === '~' || /^~[\\/]/.test(file) ? path.join(homedir(), file.slice(1)) : file;
+}
+
 /**
  * The kubectl binary: this extension's setting, else the one the Kubernetes extension is
  * configured with (per OS, then general), else `kubectl` from PATH.
@@ -48,25 +55,27 @@ function nonEmpty(value: unknown): string | undefined {
 export function effectiveKubectlPath(): string {
   const own = readSettings().kubectlPath;
   if (own) {
-    return own;
+    return expandHome(own);
   }
   const k8s = vscode.workspace.getConfiguration('vscode-kubernetes');
   const os =
     process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
-  return nonEmpty(k8s.get(`kubectl-path-${os}`)) ?? nonEmpty(k8s.get('kubectl-path')) ?? 'kubectl';
+  const configured = nonEmpty(k8s.get(`kubectl-path-${os}`)) ?? nonEmpty(k8s.get('kubectl-path'));
+  return configured ? expandHome(configured) : 'kubectl';
 }
 
 /** The kubeconfig file: this extension's setting, else the Kubernetes extension's, else kubectl's own lookup. */
 export function effectiveKubeconfig(): string | undefined {
   const own = readSettings().kubeconfigPath;
   if (own) {
-    return own;
+    return expandHome(own);
   }
   // The Kubernetes extension keeps its settings as an object with dotted keys.
   const settings = vscode.workspace
     .getConfiguration()
     .get<Record<string, unknown>>('vs-kubernetes');
-  return nonEmpty(settings?.['vs-kubernetes.kubeconfig']);
+  const configured = nonEmpty(settings?.['vs-kubernetes.kubeconfig']);
+  return configured === undefined ? undefined : expandHome(configured);
 }
 
 export interface AttachDependencies {

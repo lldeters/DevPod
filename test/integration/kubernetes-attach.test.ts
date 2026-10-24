@@ -1,6 +1,6 @@
 // "Attach to Kiro" for pods: what the command does after the click, against a kubectl stub.
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as vscode from 'vscode';
@@ -256,5 +256,16 @@ describe('which kubectl and kubeconfig are used', () => {
     state.settings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': '' };
     expect(effectiveKubectlPath()).toBe('kubectl');
     expect(effectiveKubeconfig()).toBeUndefined();
+  });
+
+  it('reads ~ as the home directory, since kubectl is started without a shell', () => {
+    state.settings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': '~/.kube/other' };
+    state.settings['vscode-kubernetes.kubectl-path'] = '~/bin/kubectl';
+    expect(effectiveKubeconfig()).toBe(path.join(homedir(), '.kube', 'other'));
+    expect(effectiveKubectlPath()).toBe(path.join(homedir(), 'bin', 'kubectl'));
+    state.settings['dev.containers.kubeconfigPath'] = '~';
+    expect(effectiveKubeconfig()).toBe(homedir());
+    state.settings['dev.containers.kubeconfigPath'] = '/a/~b';
+    expect(effectiveKubeconfig()).toBe('/a/~b');
   });
 });

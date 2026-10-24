@@ -12,8 +12,8 @@ First experimental version.
 - _Show Diagnostics_ command that copies IDE, server and engine facts (no credentials) to the clipboard.
 - Verified in Kiro 1.4.26 on Windows with Docker 29.2.0 (see docs/TESTING.md), including
   extensions, settings, port forwarding and the Kiro sign-in in the container window; other hosts
-  and configuration styles are covered by automated tests only. Kubernetes pods are not yet
-  verified in Kiro.
+  and configuration styles are covered by automated tests only. Attaching to a pod of Docker
+  Desktop's Kubernetes was reported working.
 - CLI log output: terminal color codes are removed and each command is logged once.
 - Extensions and settings from `customizations.vscode` / `customizations.kiro` (merged
   configuration, so Features are included) are installed and applied in the container;

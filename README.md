@@ -4,14 +4,17 @@ Open-source [dev container](https://containers.dev) support for the [Kiro](https
 reopen a folder inside a container, with the IDE server, terminal, extensions and language
 tooling running in it.
 
-> **Status: experimental (0.1.0), first real-world test passed.**
-> Verified in Kiro 1.4.26 (VS Code 1.131) on Windows with Docker 29.2.0: _Reopen in Container_,
-> terminal and file editing in the container, installing extensions, a Kiro agent session,
-> _Rebuild Container_, _Reopen Folder Locally_ and reconnecting to a running container.
-> **Not yet verified in Kiro:** attaching to Kubernetes pods (covered by automated tests,
-> including a real kind cluster in CI), macOS and Linux hosts, Podman, Docker Compose and Dockerfile based
-> configurations, sub folders of Git repositories and several configurations in one folder (these
-> are covered by automated tests only). See [docs/TESTING.md](docs/TESTING.md).
+> **Status: experimental (0.1.0), real-world tested.**
+> Verified in Kiro 1.4.26 (VS Code 1.131) on Windows with Docker Desktop (Docker 29.2.0):
+> _Reopen in Container_, terminal and file editing in the container, installing extensions, a Kiro
+> agent session, _Rebuild Container_, _Reopen Folder Locally_, reconnecting to a running container,
+> extensions and settings from `customizations.vscode`, port forwarding (configured and
+> automatically detected), the Kiro sign-in inside the container, and attaching to a pod of Docker
+> Desktop's Kubernetes.
+> **Not yet verified in Kiro:** macOS and Linux hosts, Podman, Docker Compose and Dockerfile based
+> configurations, sub folders of Git repositories, several configurations in one folder, and other
+> clusters than Docker Desktop's (these are covered by automated tests only, including a real kind
+> cluster for pods in CI). See [docs/TESTING.md](docs/TESTING.md).
 
 This is an independent community project. It is **not affiliated with Microsoft or Amazon**, and
 it is a clean-room implementation: it contains no code from Microsoft's proprietary "Dev

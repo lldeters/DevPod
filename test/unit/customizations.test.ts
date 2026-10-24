@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   extractCustomizations,
   extractForwardPorts,
+  extractRemoteEnv,
   portsAttributesSettings,
 } from '../../src/core/config/customizations';
 import { isValidExtensionId } from '../../src/core/extensionId';
@@ -149,5 +150,25 @@ describe('portsAttributesSettings', () => {
     expect(portsAttributesSettings({ portsAttributes: [1], otherPortsAttributes: 'x' })).toEqual(
       {},
     );
+  });
+});
+
+describe('extractRemoteEnv', () => {
+  it('passes strings and null (to remove a variable) through', () => {
+    expect(
+      extractRemoteEnv({ remoteEnv: { PATH: '/opt/bin:/usr/bin', EMPTY: '', GONE: null } }),
+    ).toEqual({ env: { PATH: '/opt/bin:/usr/bin', EMPTY: '', GONE: null }, rejected: [] });
+  });
+
+  it('rejects values of other types and unusable names', () => {
+    expect(extractRemoteEnv({ remoteEnv: { N: 1, O: {}, 'A=B': 'x', OK: 'y' } })).toEqual({
+      env: { OK: 'y' },
+      rejected: ['N', 'O', 'A=B'],
+    });
+  });
+
+  it('returns nothing without remoteEnv', () => {
+    expect(extractRemoteEnv({})).toEqual({ env: {}, rejected: [] });
+    expect(extractRemoteEnv({ remoteEnv: ['A=1'] })).toEqual({ env: {}, rejected: [] });
   });
 });

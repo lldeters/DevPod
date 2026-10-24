@@ -58,7 +58,12 @@ declare module 'vscode' {
     tunnelFeatures?: { elevation: boolean; privacyOptions: unknown[]; protocol?: boolean };
   }
 
-  export type ResolverResult = ManagedResolvedAuthority & TunnelInformation;
+  export interface ResolvedOptions {
+    /** Environment of the remote extension host and of terminals; `null` removes a variable. */
+    extensionHostEnv?: { [key: string]: string | null };
+  }
+
+  export type ResolverResult = ManagedResolvedAuthority & ResolvedOptions & TunnelInformation;
 
   export interface RemoteAuthorityResolver {
     resolve(

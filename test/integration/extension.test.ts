@@ -558,6 +558,24 @@ child.on('exit', (code) => process.exit(code ?? 1));
     );
   });
 
+  it('hands remoteEnv to the IDE for the extension host and terminals, without logging values', async () => {
+    const { resolver, logger } = setup({
+      remoteEnv: { PATH: '/opt/tool/bin:/usr/bin', API_TOKEN: 'SECRET-VALUE', UNSET_ME: null },
+    });
+    const resolved = (await resolver.resolve(authority())) as unknown as {
+      extensionHostEnv: Record<string, string | null>;
+    };
+    expect(resolved.extensionHostEnv).toEqual({
+      PATH: '/opt/tool/bin:/usr/bin',
+      API_TOKEN: 'SECRET-VALUE',
+      UNSET_ME: null,
+    });
+    expect(logger.entries.map((e) => e.message)).toContain(
+      'remoteEnv for the container: PATH, API_TOKEN, UNSET_ME',
+    );
+    expect(JSON.stringify(logger.entries)).not.toContain('SECRET-VALUE');
+  });
+
   it('leaves the container alone when the configuration asks for nothing', async () => {
     const { resolver, scripts } = setup({});
     await resolver.resolve(authority());

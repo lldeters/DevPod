@@ -6,6 +6,7 @@ import { decodeAuthority } from '../core/authority';
 import {
   extractCustomizations,
   extractForwardPorts,
+  extractRemoteEnv,
   portsAttributesSettings,
 } from '../core/config/customizations';
 import { resolveAndValidateConfig } from '../core/config/validate';
@@ -168,11 +169,26 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
         }
         const environmentTunnels = await this.hub.forwardConfigured(ports);
 
+        // remoteEnv applies to every connection (extension host and terminals), so a changed
+        // value takes effect on the next window reload without restarting the server.
+        const remoteEnv = extractRemoteEnv(config);
+        if (remoteEnv.rejected.length > 0) {
+          logger.log(
+            'warn',
+            `Ignoring remoteEnv entries that are not strings or null: ${remoteEnv.rejected.join(', ')}`,
+          );
+        }
+        const names = Object.keys(remoteEnv.env);
+        if (names.length > 0) {
+          logger.log('info', `remoteEnv for the container: ${names.join(', ')}`); // values may be secret
+        }
+
         const resolved = new vscode.ManagedResolvedAuthority(
           () => Promise.resolve(createBridge(exec, server, logger)),
           server.token,
         );
         return Object.assign(resolved, {
+          extensionHostEnv: remoteEnv.env,
           environmentTunnels,
           tunnelFeatures: { elevation: false, privacyOptions: [] },
         });

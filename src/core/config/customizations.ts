@@ -119,6 +119,28 @@ export function extractForwardPorts(config: Record<string, unknown>): {
 }
 
 /**
+ * `remoteEnv`: variables for the processes the IDE starts in the container (extension host,
+ * terminals). `null` removes a variable. The CLI has already substituted `${containerEnv:...}` and
+ * `${localEnv:...}` in its merged configuration. Entries that are neither are returned for logging.
+ */
+export function extractRemoteEnv(config: Record<string, unknown>): {
+  env: Record<string, string | null>;
+  rejected: string[];
+} {
+  const env: Record<string, string | null> = {};
+  const rejected: string[] = [];
+  const listed = config['remoteEnv'];
+  for (const [name, value] of Object.entries(isRecord(listed) ? listed : {})) {
+    if (name === '' || /[=\0]/.test(name) || (typeof value !== 'string' && value !== null)) {
+      rejected.push(name);
+    } else {
+      env[name] = value;
+    }
+  }
+  return { env, rejected };
+}
+
+/**
  * `portsAttributes` and `otherPortsAttributes` use the same shape as the IDE's
  * `remote.portsAttributes` and `remote.otherPortsAttributes` settings, so they are applied by
  * writing them into the container's machine settings.

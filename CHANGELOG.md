@@ -17,5 +17,8 @@ First experimental version.
   configuration, so Features are included) are installed and applied in the container;
   `portsAttributes` / `otherPortsAttributes` become `remote.portsAttributes` /
   `remote.otherPortsAttributes`.
+- **Attach to Kiro for Kubernetes pods**: pod context menu entry of the Kubernetes extension and a
+  palette command; new window attached to a pod container through `kubectl exec`, including port
+  forwarding. The IDE server falls back to `/tmp` when the home directory is not writable.
 - Port forwarding: `forwardPorts` are forwarded on start and the IDE's own forwards (Ports view,
   automatic detection) are tunneled to localhost; supports `"service:port"` for Compose.

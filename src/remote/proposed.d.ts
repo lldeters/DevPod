@@ -78,6 +78,14 @@ declare module 'vscode' {
     constructor(message?: string);
   }
 
+  export namespace env {
+    /**
+     * The authority of the remote window (for example `k8s-pod+<hex>`), also when the window has no
+     * folder open. `undefined` in a local window.
+     */
+    export const remoteAuthority: string | undefined;
+  }
+
   export namespace workspace {
     export function registerRemoteAuthorityResolver(
       authorityPrefix: string,

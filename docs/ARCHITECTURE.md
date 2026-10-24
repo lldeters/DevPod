@@ -9,10 +9,15 @@ src/core/     Pure TypeScript. No `vscode` import (enforced by ESLint). Fully un
   engine/       docker/podman helpers (`exec` argument builder, availability check)
   server/       IDE server provisioning: product info, URL template, platform detection,
                 install/start script, provisioner, stdio bridge script
+  exec/         ExecTarget: where a command runs (Docker container, pod container)
+  k8s/          pod references and `k8s-pod+<hex>` authorities, kubectl arguments, pod parsing
+  tunnel.ts     loopback port forwarding through bridge processes
   authority.ts  encode/decode of the `dev-container+<hex>` remote authority
   argv.ts       edit argv.json (enable-proposed-api) while preserving comments
 src/remote/   Editor integration for the connection (uses `vscode`)
-  resolver.ts   RemoteAuthorityResolver: up → provision server → connection factory
+  resolver.ts   RemoteAuthorityResolver for dev containers: up → provision server → connection
+  podResolver.ts RemoteAuthorityResolver for pods: check pod → provision server → connection
+  tunnelHub.ts  port forwarding for one window, shared by both resolvers
   bridge.ts     ManagedMessagePassing over `docker exec -i … node -e <bridge>`
   product.ts    reads the IDE's product.json via `env.appRoot`
   proposed.d.ts local declarations for the `resolvers` proposed API
@@ -61,6 +66,39 @@ Features contribute. From it the resolver reads:
   lets `"db:5432"` reach another container of a Compose project. `forwardPorts` entries are opened
   during resolution and returned as `environmentTunnels`, so the Ports view shows them as already
   forwarded. They are replaced on every resolution and closed when the resolver is disposed.
+
+## Kubernetes pods
+
+"Attach to Kiro" reuses everything that does not depend on _what_ is attached to. Server
+provisioning, the connection bridge and port tunnels only need an `ExecTarget` (`src/core/exec`),
+which turns "run this command there" into a process: `docker exec -i` for a container, `kubectl
+exec -i --container=... pod -- ...` for a pod.
+
+1. **Menu entry.** `package.json` contributes `devcontainersKiro.attachToPod` ("Attach to Kiro") to
+   `view/item/context` of the Kubernetes extension's view `extension.vsKubernetesExplorer` for items
+   whose context value matches `vsKubernetes\.resource\.pod`, the same expression that extension
+   uses for its own pod commands. The entry only appears if that extension is installed.
+2. **Which pod.** VS Code passes the clicked tree node to the command. It is resolved through the
+   Kubernetes extension's public API (`vscode-kubernetes-tools-api`, MIT, bundled) to namespace and
+   pod name. The explorer shows pods of the _current_ context, so that context is read with
+   `kubectl config current-context` and stored in the connection. Without a click (command palette)
+   the pod is chosen step by step (context, namespace, pod); if listing namespaces is forbidden the
+   namespace is typed instead.
+3. **Authority.** `k8s-pod+<hex(json)>` holds context, namespace, pod, container and, if one is
+   configured, the kubeconfig path. Every field is validated against Kubernetes naming rules; none
+   may start with a dash, and kubectl is always given `--flag=value` forms. The new window is opened
+   with `vscode.newWindow({ remoteAuthority })`, without a folder.
+4. **Resolving.** `PodResolver` asks `kubectl get pod` (with the kubeconfig _of the connection_, not
+   of the current settings) and refuses with a clear message unless the pod and container are
+   running. It then provisions the server through `kubectl exec ... -- sh -s`, as for containers,
+   and returns the connection factory.
+5. **Where the server lives.** `$HOME` if it is a writable directory, otherwise `/tmp`; the
+   detection script and the install script apply the same rule. Pods often run as a user without a
+   home directory.
+
+Limits: the pod needs `sh`, `curl` or `wget` and `tar`; `kubectl exec` streams can be cut by proxies
+or API server timeouts on long idle periods (the window then reconnects); the server and what it
+installed disappear with the pod.
 
 ## Decisions
 

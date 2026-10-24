@@ -64,7 +64,7 @@ try {
   });
 
   if (!mock.state.resolvers.has('dev-container')) fail('resolver was not registered');
-  if (mock.state.registeredCommands.size < 9) fail('commands were not registered');
+  if (mock.state.registeredCommands.size < 13) fail('commands were not registered');
 
   await mock.commands.executeCommand('devcontainersKiro.reopenInContainer');
   if (mock.state.errorMessages.length > 0) fail(mock.state.errorMessages.join('; '));
@@ -74,6 +74,18 @@ try {
   if (uri.scheme !== 'vscode-remote' || uri.path !== '/workspaces/repo/sub') {
     fail(`unexpected folder: ${uri.scheme}://…${uri.path}`);
   }
+  // The Kubernetes explorer's API is imported lazily; make sure the bundle can reach it. With no
+  // Kubernetes extension in the stand-in, the command falls back to its own pod picker, which needs
+  // kubectl: a missing kubectl must produce the helpful message, not a module error.
+  mock.state.errorMessages.length = 0;
+  mock.state.settings['dev.containers.kubectlPath'] = path.join(work, 'no-such-kubectl');
+  await mock.commands.executeCommand('devcontainersKiro.attachToPod', { fake: 'tree node' });
+  const attachError = mock.state.errorMessages.join('; ');
+  if (!attachError.includes('dev.containers.kubectlPath')) {
+    fail(`attach to pod did not reach kubectl: ${attachError || 'no message'}`);
+  }
+  if (!mock.state.resolvers.has('k8s-pod')) fail('pod resolver was not registered');
+
   console.log(
     `smoke test passed: ${mock.state.registeredCommands.size} commands, opens ${uri.path}`,
   );

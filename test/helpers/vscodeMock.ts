@@ -16,6 +16,8 @@ export const state = {
   nextChoice: undefined as string | undefined,
   /** Index of the quick pick item to select (default: first). */
   quickPickIndex: 0,
+  /** Indexes for consecutive quick picks (multi-step flows); falls back to `quickPickIndex`. */
+  quickPickSequence: [] as number[],
   quickPickCalls: [] as unknown[][],
   resolverApiEnabled: true,
   resolvers: new Map<string, unknown>(),
@@ -24,6 +26,8 @@ export const state = {
   statusBarItems: [] as { text: string; command?: string; visible: boolean }[],
   clipboard: '',
   openedDocuments: [] as { language?: string; content?: string }[],
+  remoteAuthority: undefined as string | undefined,
+  inputBoxValue: undefined as string | undefined,
 };
 
 export function reset(): void {
@@ -35,6 +39,7 @@ export function reset(): void {
   state.errorMessages = [];
   state.nextChoice = undefined;
   state.quickPickIndex = 0;
+  state.quickPickSequence = [];
   state.quickPickCalls = [];
   state.resolverApiEnabled = true;
   state.resolvers.clear();
@@ -43,6 +48,8 @@ export function reset(): void {
   state.statusBarItems = [];
   state.clipboard = '';
   state.openedDocuments = [];
+  state.remoteAuthority = undefined;
+  state.inputBoxValue = undefined;
 }
 
 export class Uri {
@@ -166,8 +173,9 @@ export const window = {
   },
   showQuickPick: async (items: unknown[]): Promise<unknown> => {
     state.quickPickCalls.push(items);
-    return items[state.quickPickIndex];
+    return items[state.quickPickSequence.shift() ?? state.quickPickIndex];
   },
+  showInputBox: async (): Promise<string | undefined> => state.inputBoxValue,
   showTextDocument: async () => undefined,
   withProgress: async <T>(
     _options: unknown,
@@ -180,12 +188,15 @@ export const workspace = {
   get workspaceFolders() {
     return state.workspaceFolders;
   },
-  getConfiguration: (section: string) => ({
-    get: <T>(key: string): T | undefined => state.settings[`${section}.${key}`] as T | undefined,
-    update: async (key: string, value: unknown): Promise<void> => {
-      state.settings[`${section}.${key}`] = value;
-    },
-  }),
+  getConfiguration: (section?: string) => {
+    const full = (key: string): string => (section ? `${section}.${key}` : key);
+    return {
+      get: <T>(key: string): T | undefined => state.settings[full(key)] as T | undefined,
+      update: async (key: string, value: unknown): Promise<void> => {
+        state.settings[full(key)] = value;
+      },
+    };
+  },
   openTextDocument: async (options: { language?: string; content?: string }) => {
     state.openedDocuments.push(options);
     return options;
@@ -214,6 +225,13 @@ export const env = {
   get remoteName() {
     return state.remoteName;
   },
+  get remoteAuthority() {
+    return state.remoteAuthority;
+  },
+};
+
+export const extensions = {
+  getExtension: (): undefined => undefined,
 };
 
 export class MockMemento {

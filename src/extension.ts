@@ -6,12 +6,16 @@ import { AUTHORITY_PREFIX } from './core/authority';
 import { DevContainerCli, resolveCliLocation } from './core/cli/devcontainerCli';
 import { ContainerEngine } from './core/engine/containerEngine';
 import { errorMessage } from './core/errors';
+import { Kubectl } from './core/k8s/kubectl';
+import { POD_AUTHORITY_PREFIX } from './core/k8s/podRef';
+import { PodResolver } from './remote/podResolver';
 import { readServerBuildInfo } from './remote/product';
 import { RebuildRequests } from './remote/rebuildRequests';
 import { DevContainerResolver } from './remote/resolver';
 import { registerCommands } from './ui/commands';
 import { OutputLogger } from './ui/logging';
 import { promptToReopen } from './ui/prompt';
+import { effectiveKubeconfig, effectiveKubectlPath } from './ui/kubernetes';
 import { RemoteSupport } from './ui/remoteState';
 import { readSettings } from './ui/settings';
 import { registerStatusBar } from './ui/statusBar';
@@ -52,9 +56,21 @@ export function activate(context: vscode.ExtensionContext): void {
     serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
   });
   context.subscriptions.push(resolver);
+
+  const kubectl = new Kubectl(effectiveKubectlPath, effectiveKubeconfig);
+  const podResolver = new PodResolver({
+    logger,
+    kubectl,
+    kubectlPath: effectiveKubectlPath,
+    serverBuild: readServerBuildInfo,
+    serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
+  });
+  context.subscriptions.push(podResolver);
+
   try {
     context.subscriptions.push(
       vscode.workspace.registerRemoteAuthorityResolver(AUTHORITY_PREFIX, resolver),
+      vscode.workspace.registerRemoteAuthorityResolver(POD_AUTHORITY_PREFIX, podResolver),
     );
     remoteSupport.enabled = true;
   } catch (error) {
@@ -72,6 +88,7 @@ export function activate(context: vscode.ExtensionContext): void {
       cli,
       rebuilds,
       remoteSupport,
+      kubectl,
     }),
     registerStatusBar(),
   );

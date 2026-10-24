@@ -24,8 +24,8 @@ export interface ServerExecutor {
 
 export interface ProvisionInput {
   containerId: string;
-  /** The container's remote user; the server runs as this user. */
-  user: string;
+  /** The container's remote user; the server runs as this user. Absent for pods. */
+  user?: string | undefined;
   build: ServerBuildInfo;
   /** User-configured template; takes precedence over the one declared by the IDE. */
   urlTemplate?: string | undefined;

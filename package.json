@@ -38,7 +38,8 @@
     "onResolveRemoteAuthority:dev-container",
     "workspaceContains:.devcontainer/devcontainer.json",
     "workspaceContains:.devcontainer.json",
-    "workspaceContains:.devcontainer/*/devcontainer.json"
+    "workspaceContains:.devcontainer/*/devcontainer.json",
+    "onResolveRemoteAuthority:k8s-pod"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -98,6 +99,21 @@
         "command": "devcontainersKiro.showDiagnostics",
         "title": "Show Diagnostics (copy to clipboard)",
         "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.attachToPod",
+        "title": "Attach to Kiro",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.attachToKubernetesContainer",
+        "title": "Attach to Running Kubernetes Container…",
+        "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.showPodMenu",
+        "title": "Show Pod Actions",
+        "category": "Kiro Dev Containers"
       }
     ],
     "menus": {
@@ -129,6 +145,25 @@
         {
           "command": "devcontainersKiro.showContainerMenu",
           "when": "false"
+        },
+        {
+          "command": "devcontainersKiro.attachToPod",
+          "when": "false"
+        },
+        {
+          "command": "devcontainersKiro.attachToKubernetesContainer",
+          "when": "!remoteName"
+        },
+        {
+          "command": "devcontainersKiro.showPodMenu",
+          "when": "false"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devcontainersKiro.attachToPod",
+          "when": "view == extension.vsKubernetesExplorer && viewItem =~ /vsKubernetes\\.resource\\.pod/i",
+          "group": "2@7"
         }
       ]
     },
@@ -173,6 +208,18 @@
           "default": "",
           "scope": "machine",
           "markdownDescription": "URL template for the IDE server that is installed inside the container. Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${release}`, `${os}`, `${arch}`. Leave empty to use `serverDownloadUrlTemplate` from the IDE's `product.json`, if present."
+        },
+        "dev.containers.kubectlPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `kubectl` used to attach to Kubernetes pods. Leave empty to use the path configured for the Kubernetes extension, or `kubectl` from `PATH`."
+        },
+        "dev.containers.kubeconfigPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods. Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
         }
       }
     }
@@ -189,11 +236,13 @@
     "package": "vsce package",
     "vscode:prepublish": "npm run build -- --production",
     "test:e2e": "vitest run test/e2e",
-    "test:smoke": "node scripts/smoke-bundle.mjs"
+    "test:smoke": "node scripts/smoke-bundle.mjs",
+    "test:e2e:k8s": "vitest run test/e2e/pod.test.ts"
   },
   "dependencies": {
     "@devcontainers/cli": "0.89.0",
-    "jsonc-parser": "^3.3.1"
+    "jsonc-parser": "^3.3.1",
+    "vscode-kubernetes-tools-api": "1.3.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

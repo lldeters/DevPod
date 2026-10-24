@@ -8,7 +8,8 @@ tooling running in it.
 > Verified in Kiro 1.4.26 (VS Code 1.131) on Windows with Docker 29.2.0: _Reopen in Container_,
 > terminal and file editing in the container, installing extensions, a Kiro agent session,
 > _Rebuild Container_, _Reopen Folder Locally_ and reconnecting to a running container.
-> **Not yet verified:** macOS and Linux hosts, Podman, Docker Compose and Dockerfile based
+> **Not yet verified in Kiro:** attaching to Kubernetes pods (covered by automated tests,
+> including a real kind cluster in CI), macOS and Linux hosts, Podman, Docker Compose and Dockerfile based
 > configurations, sub folders of Git repositories and several configurations in one folder (these
 > are covered by automated tests only). See [docs/TESTING.md](docs/TESTING.md).
 
@@ -32,6 +33,11 @@ Containers" extension. It builds on the public specification and the open-source
 - **Port forwarding:** `forwardPorts` (numbers, or `"service:port"` for Compose) are forwarded on
   start, and ports the IDE detects or you forward in the Ports view are tunneled to `localhost`.
   Tunnels listen on the loopback interface only.
+- **Attach to Kiro for Kubernetes pods:** right-click a pod in the Kubernetes extension's explorer
+  and choose **Attach to Kiro**, or run **Attach to Running Kubernetes Container...** from the
+  command palette (it works without the Kubernetes extension, too). A new window opens whose files,
+  terminal, extensions and ports live in a container of that pod. See
+  [Kubernetes pods](#kubernetes-pods).
 - Docker and Podman.
 - No telemetry.
 
@@ -74,14 +80,39 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 
 ## Settings
 
-| Setting                                    | Default  | Purpose                                                |
-| ------------------------------------------ | -------- | ------------------------------------------------------ |
-| `dev.containers.dockerPath`                | `docker` | Container engine CLI (`docker` or `podman`).           |
-| `dev.containers.dockerComposePath`         | empty    | Compose CLI; empty lets the Dev Container CLI choose.  |
-| `dev.containers.devcontainerCliPath`       | empty    | Use your own `devcontainer` instead of the bundled one |
-| `dev.containers.logLevel`                  | `info`   | `info`, `debug` or `trace`.                            |
-| `dev.containers.promptToReopen`            | `true`   | Offer to reopen folders that have a configuration.     |
-| `dev.containers.serverDownloadUrlTemplate` | empty    | Where to download the IDE server (see above).          |
+| Setting                                    | Default  | Purpose                                                                   |
+| ------------------------------------------ | -------- | ------------------------------------------------------------------------- |
+| `dev.containers.dockerPath`                | `docker` | Container engine CLI (`docker` or `podman`).                              |
+| `dev.containers.dockerComposePath`         | empty    | Compose CLI; empty lets the Dev Container CLI choose.                     |
+| `dev.containers.devcontainerCliPath`       | empty    | Use your own `devcontainer` instead of the bundled one                    |
+| `dev.containers.logLevel`                  | `info`   | `info`, `debug` or `trace`.                                               |
+| `dev.containers.promptToReopen`            | `true`   | Offer to reopen folders that have a configuration.                        |
+| `dev.containers.serverDownloadUrlTemplate` | empty    | Where to download the IDE server (see above).                             |
+| `dev.containers.kubectlPath`               | empty    | `kubectl` for pods; else the Kubernetes extension's, else `PATH`.         |
+| `dev.containers.kubeconfigPath`            | empty    | kubeconfig for pods; else the Kubernetes extension's, else kubectl's own. |
+
+## Kubernetes pods
+
+**Attach to Kiro** opens a window in a container of a running pod, like _Attach Visual Studio Code_
+in the original extension.
+
+- In the Kubernetes extension's **Clusters** view, right-click a pod and choose **Attach to Kiro**.
+  The pods shown there belong to the current kubectl context; that context is stored in the new
+  window, so switching contexts later does not redirect it.
+- Without the Kubernetes extension, run **Kiro Dev Containers: Attach to Running Kubernetes
+  Container...** and pick context, namespace and pod.
+- A pod with several containers asks which one to use (the pod's default container first).
+- Use **File > Open Folder** in the new window to open a folder of the pod.
+
+What the pod needs: a running container with `sh`, `curl` or `wget`, and `tar`, on Linux x64 or
+arm64. The IDE server is installed in the user's home directory, or in `/tmp` if that is not
+writable. It is not part of the pod's image, so it is installed again after the pod is recreated.
+Images without a shell (for example distroless images) cannot be used. `kubectl` must be installed
+and able to reach the cluster; the path and kubeconfig of the Kubernetes extension are honored, or
+set `dev.containers.kubectlPath` / `dev.containers.kubeconfigPath`.
+
+A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
+dev container configuration do not apply to pods. Port forwarding works as for containers.
 
 ## Security
 

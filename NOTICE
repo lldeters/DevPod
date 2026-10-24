@@ -22,6 +22,11 @@ Third-party software distributed with this product
   Shipped unmodified inside the extension package at node_modules/@devcontainers/cli,
   together with its own LICENSE.txt and ThirdPartyNotices.txt.
 
+vscode-kubernetes-tools-api 1.3.0 - MIT License
+  Copyright (c) Microsoft Corporation
+  https://github.com/Azure/vscode-kubernetes-tools-api
+  Bundled into dist/extension.js. Its license text is reproduced in THIRD_PARTY_LICENSES.md.
+
 jsonc-parser 3.3.1 - MIT License
   Copyright (c) Microsoft
   https://github.com/microsoft/node-jsonc-parser

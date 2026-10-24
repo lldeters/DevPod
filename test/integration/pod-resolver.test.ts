@@ -1,0 +1,307 @@
+// The whole path into a pod, with a local stand-in for it: `kubectl exec` (see
+// test/helpers/kubectlStub.ts) runs the command locally. Provisioning installs a fake IDE server
+// (an echo server) from a tarball, starts it, and the connection and port tunnels talk to it
+// through the very same bridge processes that run inside a real pod.
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
+import * as net from 'node:net';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Kubectl } from '../../src/core/k8s/kubectl';
+import { encodePodAuthority } from '../../src/core/k8s/podRef';
+import type { PodRef } from '../../src/core/k8s/podRef';
+import { MemoryLogger } from '../../src/core/logger';
+import { PodResolver } from '../../src/remote/podResolver';
+import * as mock from '../helpers/vscodeMock';
+import { createKubectlStub, podJson } from '../helpers/kubectlStub';
+import type { KubectlStub } from '../helpers/kubectlStub';
+
+const { state } = mock;
+
+const hasTools = ['sh', 'curl', 'tar'].every(
+  (tool) => spawnSync('sh', ['-c', `command -v ${tool}`]).status === 0,
+);
+
+const ref: PodRef = { context: 'kind-test', namespace: 'dev', pod: 'mypod', container: 'app' };
+const build = {
+  commit: 'abc123',
+  quality: 'stable',
+  version: '1.0.0',
+  serverApplicationName: 'fake-server',
+  serverDataFolderName: '.pod-test-server',
+};
+
+type Resolved = mock.ManagedResolvedAuthority & { environmentTunnels: unknown[] };
+
+describe.skipIf(process.platform === 'win32' || !hasTools)(
+  'PodResolver (local stand-in for a pod)',
+  () => {
+    let root: string;
+    let home: string;
+    let archive: string;
+    let stub: KubectlStub;
+    const cleanups: (() => Promise<void> | void)[] = [];
+
+    beforeAll(async () => {
+      root = await realpath(await mkdtemp(path.join(tmpdir(), 'dck-pod-')));
+      home = path.join(root, 'podhome');
+      await mkdir(home);
+      stub = await createKubectlStub(root);
+
+      // A fake IDE server: records its arguments, then runs an echo server that announces its port.
+      const top = path.join(root, 'src', 'fake-server-linux-x64');
+      await mkdir(path.join(top, 'bin'), { recursive: true });
+      await symlink(process.execPath, path.join(top, 'node'));
+      await writeFile(
+        path.join(top, 'server.js'),
+        [
+          "const net = require('net');",
+          'const server = net.createServer((s) => s.pipe(s));',
+          "server.listen(0, '127.0.0.1', () => {",
+          "  console.log('Extension host agent listening on ' + server.address().port);",
+          '});',
+        ].join('\n'),
+      );
+      const launcher = path.join(top, 'bin', 'fake-server');
+      await writeFile(
+        launcher,
+        [
+          '#!/bin/sh',
+          'D="$(dirname "$0")/.."',
+          'printf \'%s\\n\' "$@" > "$D/args.txt"',
+          'exec "$D/node" "$D/server.js"',
+          '',
+        ].join('\n'),
+      );
+      await chmod(launcher, 0o755);
+      archive = path.join(root, 'server.tar.gz');
+      execFileSync('tar', ['-czf', archive, '-C', path.join(root, 'src'), 'fake-server-linux-x64']);
+
+      process.env['KUBECTL_STUB_DIR'] = stub.dir;
+      process.env['KUBECTL_STUB_HOME'] = home;
+    });
+
+    afterAll(async () => {
+      delete process.env['KUBECTL_STUB_DIR'];
+      delete process.env['KUBECTL_STUB_HOME'];
+      await rm(root, { recursive: true, force: true });
+    });
+
+    beforeEach(async () => {
+      mock.reset();
+      await stub.reset();
+      await stub.set('pod.json', podJson());
+    });
+
+    afterEach(async () => {
+      while (cleanups.length > 0) await cleanups.pop()?.();
+      try {
+        const pid = (
+          await readFile(path.join(home, '.pod-test-server', 'server-abc123.pid'), 'utf8')
+        ).trim();
+        process.kill(Number(pid), 'SIGKILL');
+      } catch {
+        // no server was started
+      }
+      await rm(path.join(home, '.pod-test-server'), { recursive: true, force: true });
+    });
+
+    function createResolver(): { resolver: PodResolver; logger: MemoryLogger } {
+      const logger = new MemoryLogger();
+      const resolver = new PodResolver({
+        logger,
+        kubectl: new Kubectl(
+          () => stub.path,
+          () => undefined,
+        ),
+        kubectlPath: () => stub.path,
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+      });
+      cleanups.push(() => resolver.dispose());
+      return { resolver, logger };
+    }
+
+    function startEcho(): Promise<number> {
+      return new Promise((resolve) => {
+        const server = net.createServer((socket) => socket.pipe(socket));
+        cleanups.push(() => new Promise<void>((done) => server.close(() => done())));
+        server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
+      });
+    }
+
+    async function echoThrough(port: number, text: string): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const socket = net.connect(port, '127.0.0.1');
+        let received = '';
+        socket.on('data', (chunk) => {
+          received += chunk.toString();
+          if (received.length >= text.length) socket.end();
+        });
+        socket.on('close', () => resolve(received));
+        socket.on('error', reject);
+        socket.on('connect', () => socket.write(text));
+      });
+    }
+
+    it('installs and starts the server in the pod through kubectl exec and returns its token', async () => {
+      const { resolver } = createResolver();
+      const resolved = (await resolver.resolve(encodePodAuthority(ref))) as unknown as Resolved;
+
+      expect(resolved).toBeInstanceOf(mock.ManagedResolvedAuthority);
+      expect(resolved.connectionToken).toMatch(/^[0-9a-f]{48}$/);
+      expect(resolved.environmentTunnels).toEqual([]);
+
+      // everything went through kubectl exec into the chosen container, as the chosen context
+      const execs = (await stub.calls()).filter((args) => args.includes('exec'));
+      expect(execs.length).toBeGreaterThanOrEqual(2); // platform detection and installation
+      for (const args of execs) {
+        expect(args).toEqual(
+          expect.arrayContaining([
+            '--context=kind-test',
+            '--namespace=dev',
+            '--container=app',
+            'mypod',
+            '--',
+          ]),
+        );
+        expect(args.slice(args.indexOf('--') + 1)).toEqual(['sh', '-s']);
+      }
+
+      const args = await readFile(
+        path.join(home, '.pod-test-server', 'bin', 'abc123', 'args.txt'),
+        'utf8',
+      );
+      expect(args.split('\n')).toEqual(
+        expect.arrayContaining(['--start-server', '--host=127.0.0.1']),
+      );
+      expect(args).not.toContain(resolved.connectionToken as string); // token travels as a file
+    });
+
+    it('connects to the server inside the pod through a bridge', async () => {
+      const { resolver } = createResolver();
+      const resolved = (await resolver.resolve(encodePodAuthority(ref))) as unknown as Resolved;
+
+      const connection = (await resolved.makeConnection()) as {
+        onDidReceiveMessage: (listener: (data: Uint8Array) => void) => unknown;
+        send: (data: Uint8Array) => void;
+        end: () => void;
+      };
+      const echoed = new Promise<string>((resolve) => {
+        connection.onDidReceiveMessage((data) => resolve(Buffer.from(data).toString()));
+      });
+      connection.send(Buffer.from('hello pod'));
+      expect(await echoed).toBe('hello pod');
+      connection.end();
+    });
+
+    it('reuses the running server when the window reconnects', async () => {
+      const { resolver } = createResolver();
+      const first = (await resolver.resolve(encodePodAuthority(ref))) as unknown as Resolved;
+      await rm(archive, { force: true }); // a second download would fail
+      const second = (await resolver.resolve(encodePodAuthority(ref))) as unknown as Resolved;
+      expect(second.connectionToken).toBe(first.connectionToken);
+      execFileSync('tar', ['-czf', archive, '-C', path.join(root, 'src'), 'fake-server-linux-x64']); // restore
+    });
+
+    it('forwards ports of the pod to localhost through kubectl exec', async () => {
+      const remote = await startEcho();
+      const { resolver } = createResolver();
+      await resolver.resolve(encodePodAuthority(ref));
+
+      const tunnel = await resolver.tunnelFactory({
+        remoteAddress: { host: 'localhost', port: remote },
+      });
+      const local = (tunnel.localAddress as { port: number }).port;
+      expect(await echoThrough(local, 'through kubectl')).toBe('through kubectl');
+
+      // the bridge ran in the pod, with the pod's Node and the requested port and host
+      const bridges = (await stub.calls()).filter((args) => args.includes('-e'));
+      const last = bridges.at(-1) ?? [];
+      expect(last.slice(-2)).toEqual([String(remote), 'localhost']);
+      expect(last).toEqual(expect.arrayContaining(['--container=app', 'mypod']));
+      await tunnel.dispose();
+    });
+
+    it('refuses tunnels before the pod is attached', async () => {
+      const { resolver } = createResolver();
+      await expect(
+        resolver.tunnelFactory({ remoteAddress: { host: 'localhost', port: 3000 } }),
+      ).rejects.toThrow(/not connected/);
+    });
+
+    it('uses the kubeconfig stored in the connection for every kubectl call', async () => {
+      const { resolver } = createResolver();
+      await resolver.resolve(encodePodAuthority({ ...ref, kubeconfig: '/home/me/.kube/other' }));
+      const calls = await stub.calls();
+      expect(calls.length).toBeGreaterThan(2);
+      expect(calls.every((args) => args.includes('--kubeconfig=/home/me/.kube/other'))).toBe(true);
+    });
+
+    it('refuses a pod that is not running before running anything in it', async () => {
+      await stub.set(
+        'pod.json',
+        podJson({ phase: 'Pending', containers: [{ name: 'app', running: false }] }),
+      );
+      const { resolver } = createResolver();
+      await expect(resolver.resolve(encodePodAuthority(ref))).rejects.toMatchObject({
+        kind: 'NotAvailable',
+        message: expect.stringMatching(/not running \(status: Pending\)/),
+      });
+      expect((await stub.calls()).some((args) => args.includes('exec'))).toBe(false);
+    });
+
+    it('names the containers when the chosen one does not exist', async () => {
+      await stub.set('pod.json', podJson({ containers: [{ name: 'web', running: true }] }));
+      const { resolver } = createResolver();
+      await expect(resolver.resolve(encodePodAuthority(ref))).rejects.toMatchObject({
+        message: expect.stringMatching(/no container "app"\. Containers: web/),
+      });
+    });
+
+    it('reports a pod that is gone, with what kubectl said', async () => {
+      await stub.unset('pod.json');
+      const { resolver } = createResolver();
+      await expect(resolver.resolve(encodePodAuthority(ref))).rejects.toMatchObject({
+        kind: 'NotAvailable',
+        message: expect.stringContaining('NotFound'),
+      });
+    });
+
+    it('rejects an invalid authority without calling kubectl', async () => {
+      const { resolver } = createResolver();
+      await expect(resolver.resolve('k8s-pod+nothex')).rejects.toMatchObject({
+        kind: 'NotAvailable',
+      });
+      expect(await stub.calls()).toEqual([]);
+    });
+
+    it('explains how to fix a missing kubectl', async () => {
+      const logger = new MemoryLogger();
+      const resolver = new PodResolver({
+        logger,
+        kubectl: new Kubectl(
+          () => path.join(root, 'no-such-kubectl'),
+          () => undefined,
+        ),
+        kubectlPath: () => path.join(root, 'no-such-kubectl'),
+        serverBuild: async () => build,
+        serverUrlTemplate: () => undefined,
+      });
+      await expect(resolver.resolve(encodePodAuthority(ref))).rejects.toMatchObject({
+        message: expect.stringMatching(/Install kubectl or set "dev\.containers\.kubectlPath"/),
+      });
+      expect(state.errorMessages).toEqual([]);
+    });
+  },
+);

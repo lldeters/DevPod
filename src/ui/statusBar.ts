@@ -5,10 +5,23 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { decodeAuthority } from '../core/authority';
 import { Commands } from './commands';
-import { currentAuthority } from './remoteState';
+import { currentAuthority, currentPodRef } from './remoteState';
 
-/** Shows an entry in dev container windows that opens the container actions menu. */
+/** Shows an entry in dev container and pod windows that opens the matching actions menu. */
 export function registerStatusBar(): vscode.Disposable {
+  const pod = currentPodRef();
+  if (pod) {
+    const podItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10_000);
+    podItem.text = `$(remote) Pod: ${pod.pod}`;
+    podItem.tooltip = `${pod.namespace}/${pod.pod}, container ${pod.container}${
+      pod.context ? `, context ${pod.context}` : ''
+    }`;
+    podItem.command = Commands.showPodMenu;
+    podItem.backgroundColor = new vscode.ThemeColor('statusBarItem.remoteBackground');
+    podItem.color = new vscode.ThemeColor('statusBarItem.remoteForeground');
+    podItem.show();
+    return podItem;
+  }
   const authority = currentAuthority();
   if (!authority) {
     return new vscode.Disposable(() => undefined);

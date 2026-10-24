@@ -87,7 +87,9 @@ COMMIT=${shQuote(params.commit)}
 APP_NAME=${shQuote(params.applicationName)}
 DOWNLOAD_URL=${shQuote(params.downloadUrl)}
 
-ROOT="$HOME/$DATA_FOLDER"
+BASE="\${HOME:-}"
+if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ]; then BASE=/tmp; fi
+ROOT="$BASE/$DATA_FOLDER"
 SERVER_DIR="$ROOT/bin/$COMMIT"
 LOG_FILE="$ROOT/server-$COMMIT.log"
 PID_FILE="$ROOT/server-$COMMIT.pid"

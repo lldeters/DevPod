@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as vscode from 'vscode';
 import { decodeAuthority, encodeAuthority } from '../../src/core/authority';
+import { encodePodAuthority } from '../../src/core/k8s/podRef';
 import type { DevContainerCli } from '../../src/core/cli/devcontainerCli';
 import type { ContainerEngine } from '../../src/core/engine/containerEngine';
 import { MemoryLogger } from '../../src/core/logger';
@@ -81,9 +82,10 @@ beforeEach(() => {
 });
 
 describe('activation', () => {
-  it('registers the resolver and every command', () => {
+  it('registers the resolvers and every command', () => {
     activateExtension();
     expect(state.resolvers.has('dev-container')).toBe(true);
+    expect(state.resolvers.has('k8s-pod')).toBe(true);
     for (const id of Object.values(Commands)) {
       expect(state.registeredCommands.has(id), id).toBe(true);
     }
@@ -168,6 +170,40 @@ describe('Reopen in Container', () => {
     expect(state.errorMessages).toHaveLength(1);
     expect(state.errorMessages[0]).toMatch(/devcontainer\.json:1:\d+/);
     expect(state.executed.some((entry) => entry.command === 'vscode.openFolder')).toBe(false);
+  });
+});
+
+describe('inside a Kubernetes pod window', () => {
+  const podAuthority = encodePodAuthority({
+    context: 'kind-test',
+    namespace: 'dev',
+    pod: 'mypod',
+    container: 'app',
+  });
+
+  it('shows the pod in the status bar, also in a window without a folder', () => {
+    state.remoteAuthority = podAuthority; // an attached window has no folder open yet
+    activateExtension();
+    expect(state.statusBarItems).toHaveLength(1);
+    expect(state.statusBarItems[0]).toMatchObject({
+      text: '$(remote) Pod: mypod',
+      command: Commands.showPodMenu,
+      visible: true,
+    });
+  });
+
+  it('is not mistaken for a dev container window', () => {
+    state.remoteAuthority = podAuthority;
+    activateExtension();
+    expect(state.statusBarItems.every((item) => !item.text.includes('Dev Container'))).toBe(true);
+  });
+
+  it('offers to close the connection from the pod menu', async () => {
+    state.remoteAuthority = podAuthority;
+    activateExtension();
+    state.quickPickIndex = 1;
+    await mock.commands.executeCommand(Commands.showPodMenu);
+    expect(state.executed.at(-1)?.command).toBe('workbench.action.remote.close');
   });
 });
 

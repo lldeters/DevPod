@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DevContainerError } from '../../src/core/errors';
+import { detectPlatformScript, parsePlatform } from '../../src/core/server/platform';
 import { runProcess } from '../../src/core/process';
 import {
   buildInstallScript,
@@ -233,6 +234,46 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
       },
     ).trim();
     expect(leftovers).toBe('0');
+  });
+
+  it('installs below /tmp when the home directory is unusable (common in pods)', async () => {
+    const folder = `.dck-fallback-${process.pid}`;
+    const fallbackCommit = 'cafe1234';
+    const script = buildInstallScript({
+      ...options(),
+      dataFolderName: folder,
+      commit: fallbackCommit,
+    });
+    try {
+      for (const unusableHome of [path.join(work, 'does-not-exist'), '']) {
+        const env = { ...process.env, HOME: unusableHome };
+        const result = await runProcess('sh', ['-s'], { stdin: script, env });
+        const info = parseInstallResult(result.stdout);
+        expect(info.serverDir).toBe(`/tmp/${folder}/bin/${fallbackCommit}`);
+        process.kill(
+          Number((await readFile(`/tmp/${folder}/server-${fallbackCommit}.pid`, 'utf8')).trim()),
+          'SIGKILL',
+        );
+        await rm(`/tmp/${folder}`, { recursive: true, force: true });
+      }
+    } finally {
+      await rm(`/tmp/${folder}`, { recursive: true, force: true });
+    }
+  });
+
+  it('detects /tmp as the base for a platform whose HOME is unset or missing', async () => {
+    for (const home of [undefined, path.join(work, 'does-not-exist')]) {
+      const env = { ...process.env };
+      if (home === undefined) delete env['HOME'];
+      else env['HOME'] = home;
+      const result = await runProcess('sh', ['-s'], { stdin: detectPlatformScript, env });
+      expect(parsePlatform(result.stdout).home).toBe('/tmp');
+    }
+    const usable = await runProcess('sh', ['-s'], {
+      stdin: detectPlatformScript,
+      env: { ...process.env, HOME: home },
+    });
+    expect(parsePlatform(usable.stdout).home).toBe(home); // a usable home is still preferred
   });
 
   it('reports a missing launcher', async () => {

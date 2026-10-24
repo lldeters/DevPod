@@ -15,13 +15,18 @@ export interface ContainerPlatform {
 
 export const PLATFORM_MARKER = 'devcontainers-kiro-platform';
 
-/** POSIX sh script that reports kernel, machine, libc flavour and $HOME of the container user. */
+/**
+ * POSIX sh script that reports kernel, machine, libc flavour and where the server may be installed:
+ * the user's $HOME, or /tmp when that is unset or not writable (common in Kubernetes pods).
+ */
 export const detectPlatformScript = `
 echo "${PLATFORM_MARKER}: start"
 echo "kernel==$(uname -s)"
 echo "machine==$(uname -m)"
 if [ -f /etc/alpine-release ]; then echo "libc==musl"; else echo "libc==gnu"; fi
-echo "home==$HOME"
+BASE="\${HOME:-}"
+if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ]; then BASE=/tmp; fi
+echo "home==$BASE"
 echo "${PLATFORM_MARKER}: end"
 `;
 

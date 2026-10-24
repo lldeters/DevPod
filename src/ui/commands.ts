@@ -5,12 +5,15 @@ import * as vscode from 'vscode';
 import { decodeAuthority, encodeAuthority } from '../core/authority';
 import type { DevContainerCli } from '../core/cli/devcontainerCli';
 import type { ContainerEngine } from '../core/engine/containerEngine';
+import type { Kubectl } from '../core/k8s/kubectl';
 import { discoverConfigs } from '../core/config/discovery';
 import { resolveAndValidateConfig } from '../core/config/validate';
 import type { DiscoveredConfig } from '../core/config/discovery';
 import { errorMessage } from '../core/errors';
 import type { RebuildRequests } from '../remote/rebuildRequests';
 import { showDiagnostics } from './diagnostics';
+import { attachToPod, resolveExplorerTarget } from './kubernetes';
+import type { ExplorerTarget } from './kubernetes';
 import type { OutputLogger } from './logging';
 import { currentAuthority, localWorkspaceFolder } from './remoteState';
 import type { RemoteSupport } from './remoteState';
@@ -27,6 +30,9 @@ export const Commands = {
   showContainerMenu: 'devcontainersKiro.showContainerMenu',
   setupRemoteSupport: 'devcontainersKiro.setupRemoteSupport',
   showDiagnostics: 'devcontainersKiro.showDiagnostics',
+  attachToPod: 'devcontainersKiro.attachToPod',
+  attachToKubernetesContainer: 'devcontainersKiro.attachToKubernetesContainer',
+  showPodMenu: 'devcontainersKiro.showPodMenu',
 } as const;
 
 export interface CommandServices {
@@ -37,6 +43,9 @@ export interface CommandServices {
   cli: DevContainerCli;
   rebuilds: RebuildRequests;
   remoteSupport: RemoteSupport;
+  kubectl: Kubectl;
+  /** Replaceable in tests; by default the Kubernetes extension's API is used. */
+  resolveExplorerTarget?: (target: unknown) => Promise<ExplorerTarget | undefined>;
 }
 
 async function pickConfig(
@@ -64,18 +73,20 @@ function remoteFolderUri(authority: string, containerPath: string): vscode.Uri {
 export function registerCommands(services: CommandServices): vscode.Disposable[] {
   const { logger, cli, rebuilds, remoteSupport } = services;
 
-  const guard = (run: () => Promise<void>) => async (): Promise<void> => {
-    try {
-      await run();
-    } catch (error) {
-      logger.log('error', errorMessage(error));
-      const open = 'Show Log';
-      const choice = await vscode.window.showErrorMessage(errorMessage(error), open);
-      if (choice === open) {
-        logger.show();
+  const guard =
+    (run: (...args: unknown[]) => Promise<void>) =>
+    async (...args: unknown[]): Promise<void> => {
+      try {
+        await run(...args);
+      } catch (error) {
+        logger.log('error', errorMessage(error));
+        const open = 'Show Log';
+        const choice = await vscode.window.showErrorMessage(errorMessage(error), open);
+        if (choice === open) {
+          logger.show();
+        }
       }
-    }
-  };
+    };
 
   /** Remote support depends on a proposed API; guide the user if it is not enabled yet. */
   const ensureRemoteSupport = async (): Promise<boolean> => {
@@ -204,11 +215,35 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
     }
   };
 
-  const register = (id: string, run: () => Promise<void> | void): vscode.Disposable =>
+  const register = (
+    id: string,
+    run: (...args: unknown[]) => Promise<void> | void,
+  ): vscode.Disposable =>
     vscode.commands.registerCommand(
       id,
-      guard(async () => run()),
+      guard(async (...args) => run(...args)),
     );
+
+  const attachDependencies = {
+    logger,
+    kubectl: services.kubectl,
+    ensureRemoteSupport,
+    resolveTarget: services.resolveExplorerTarget ?? resolveExplorerTarget,
+  };
+
+  const showPodMenu = async (): Promise<void> => {
+    const items: (vscode.QuickPickItem & { command: string })[] = [
+      { label: '$(output) Show Log', command: Commands.showLog },
+      {
+        label: '$(debug-disconnect) Close Remote Connection',
+        command: 'workbench.action.remote.close',
+      },
+    ];
+    const picked = await vscode.window.showQuickPick(items, { title: 'Kubernetes pod' });
+    if (picked) {
+      await vscode.commands.executeCommand(picked.command);
+    }
+  };
 
   return [
     register(Commands.reopenInContainer, () => openInContainer(false)),
@@ -220,6 +255,10 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
     register(Commands.showLog, () => logger.show()),
     register(Commands.showContainerMenu, showContainerMenu),
     register(Commands.setupRemoteSupport, () => setupRemoteSupport(services.extensionId, logger)),
+    // "Attach to Kiro" in the Kubernetes explorer receives the clicked node as its argument.
+    register(Commands.attachToPod, (target) => attachToPod(attachDependencies, target)),
+    register(Commands.attachToKubernetesContainer, () => attachToPod(attachDependencies)),
+    register(Commands.showPodMenu, showPodMenu),
     register(Commands.showDiagnostics, () =>
       showDiagnostics({
         extensionId: services.extensionId,

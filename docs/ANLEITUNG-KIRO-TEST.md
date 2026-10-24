@@ -287,13 +287,108 @@ Set-Content $HOME\kiro-devcontainer-test2\.devcontainer\devcontainer.json '{ "na
 
 Im Protokoll (Ansicht → Ausgabe → „Kiro Dev Containers“) sollten Zeilen stehen wie
 `Extensions for the container: esbenp.prettier-vscode` und
-`Forwarding localhost:3000 in the container to localhost:3000`.
+`Forwarding localhost:3000 to localhost:3000`.
 
 ### 10d: Was ich von dir brauche
 
 Hake die Punkte aus 10c ab und schreib mir bei jedem, der nicht klappt, **was du siehst**. Das
 Protokoll ist hier besonders hilfreich. Wenn die Extension nicht erscheint, ist das wichtig zu
 wissen: Dann prüfe ich, ob Kiros Server den Startparameter akzeptiert.
+
+---
+
+## Schritt 11: An einen Kubernetes-Pod anhängen („Attach to Kiro“)
+
+Dieser Schritt prüft die Funktion, die dir am wichtigsten ist: im Pod-Menü der Kubernetes-Extension
+**„Attach to Kiro“** wählen, und Kiro öffnet ein Fenster, das mit dem Pod verbunden ist.
+
+### 11a: Voraussetzungen
+
+- Ein erreichbarer Cluster (minikube, kind, Docker Desktop, AKS, EKS … alles geht) und ein
+  funktionierendes `kubectl`. Prüfe im Terminal:
+
+  ```sh
+  kubectl config current-context
+  kubectl get pods -A
+  ```
+
+  Beides muss ohne Fehler antworten. Unter Windows muss `kubectl` im `PATH` stehen (oder du setzt
+  die Einstellung `dev.containers.kubectlPath`).
+
+- Die neueste Version der Extension aus dem **neuesten grünen Lauf** (wie in Schritt 10a).
+  Freischaltung (Schritt 4) und Vertrauen für den Ordner (Schritt 6) bleiben nötig.
+
+- Optional, aber für das Pod-Menü nötig: die **Kubernetes-Extension** (`ms-kubernetes-tools`) in
+  Kiro. Ohne sie gibt es kein Pod-Menü, aber den Befehl in der Befehlspalette (siehe 11c).
+
+### 11b: Einen Test-Pod starten
+
+Für den ersten Test nimmst du dieses Image, weil es sicher alles Nötige (`sh`, `curl`, `tar`)
+enthält. Danach probierst du deine echten Dev-Pod-Images.
+
+```sh
+kubectl run kiro-test --image=mcr.microsoft.com/devcontainers/javascript-node:22 --restart=Never --command -- sleep 3600
+kubectl wait --for=condition=Ready pod/kiro-test --timeout=180s
+```
+
+Der erste Start lädt das Image und kann einige Minuten dauern. Danach zeigt `kubectl get pod
+kiro-test` den Status **Running**.
+
+### 11c: Anhängen
+
+**Variante 1 – über die Kubernetes-Extension (das Ziel):**
+
+1. Öffne in Kiro die Ansicht der Kubernetes-Extension (Symbol in der Seitenleiste) und klappe unter
+   **Clusters** deinen Cluster → **Workloads** → **Pods** auf.
+2. **Rechtsklick auf `kiro-test` → „Attach to Kiro“.**
+
+**Variante 2 – über die Befehlspalette (geht auch ohne Kubernetes-Extension):**
+
+1. Befehlspalette → **„Kiro Dev Containers: Attach to Running Kubernetes Container…“**
+2. Wähle nacheinander den Kontext (nur wenn du mehrere hast), den Namespace (`default`) und den Pod
+   (`kiro-test`).
+
+In beiden Fällen: Hat der Pod mehrere Container, fragt Kiro, welchen du willst. Dann öffnet sich
+ein **neues Fenster**. Die Installation des Servers im Pod dauert beim ersten Mal einige Sekunden.
+
+### 11d: Prüfen
+
+- [ ] Im Rechtsklick-Menü des Pods steht **„Attach to Kiro“** (Variante 1).
+- [ ] Ein neues Fenster öffnet sich; unten links steht **„Pod: kiro-test“**.
+- [ ] Ein Terminal (**Terminal → Neues Terminal**) läuft im Pod: `hostname` gibt `kiro-test` aus.
+- [ ] **Datei → Ordner öffnen…** zeigt die Dateien des Pods (z. B. `/home/node` oder `/root`).
+      Lege dort eine Datei an und speichere sie.
+- [ ] Eine Extension lässt sich im Pod-Fenster installieren (Extensions-Ansicht).
+- [ ] Port-Weiterleitung: Starte im Terminal des Pod-Fensters
+      `node -e "require('http').createServer((q,r)=>r.end('Hallo aus dem Pod')).listen(3000)"`
+      und öffne <http://localhost:3000> im Browser auf deinem Rechner. Es sollte **„Hallo aus dem
+      Pod“** erscheinen (das Panel „Ports“ zeigt den Port von selbst).
+- [ ] Schließe das Fenster und hänge dich erneut an. Das zweite Mal geht deutlich schneller, weil
+      der Server im Pod weiterläuft.
+- [ ] Der Cluster-Kontext ist der, den der Explorer anzeigt (relevant, wenn du mehrere hast).
+
+### 11e: Wenn es nicht klappt – häufige Ursachen
+
+| Meldung oder Beobachtung                            | Bedeutung und was du tun kannst                                                                                                  |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| „Could not run "kubectl" …“                         | `kubectl` wird nicht gefunden. Installieren, in den `PATH` legen oder `dev.containers.kubectlPath` setzen.                       |
+| „Pod … is not running (status: Pending)“            | Der Pod läuft noch nicht. Warte, bis `kubectl get pod` **Running** zeigt.                                                        |
+| „… has no container "x". Containers: a, b“          | Der Container-Name stimmt nicht (z. B. nach einem Neustart des Pods). Hänge dich neu an.                                         |
+| Fehler mit `curl`/`wget`/`tar` oder `sh: not found` | Das Image enthält die nötigen Werkzeuge nicht (z. B. „distroless“ oder sehr schlanke Images). Nimm ein anderes Image zum Testen. |
+| „download failed“ mit Adresse                       | Der Pod erreicht Kiros Download-Server nicht (Firewall/Proxy im Cluster) oder es gibt dort keinen Build für das Betriebssystem.  |
+| Das Menü „Attach to Kiro“ fehlt                     | Die Kubernetes-Extension ist nicht installiert oder du klickst nicht auf einen Pod. Nimm Variante 2.                             |
+
+Schick mir bei Problemen die genaue Meldung, den Inhalt von **Ansicht → Ausgabe → „Kiro Dev
+Containers“** und die Ausgabe von `kubectl get pod <name> -o wide`. Zum Aufräumen:
+`kubectl delete pod kiro-test`.
+
+### 11f: Was ich außerdem wissen möchte
+
+- Hast du die Kubernetes-Extension in Kiro (welche Version) und wie hast du sie installiert?
+- Funktioniert es auch mit **deinem echten Dev-Pod**-Image? Wenn nicht: welches Basis-Image ist es
+  (Alpine, Debian/Ubuntu, …)? Für Alpine fragt die Extension einen anderen Server-Build an
+  (`kiro-reh-alpine-…`). Ob Kiro ihn anbietet, zeigt sich an der Meldung „download failed“ mit
+  der Adresse.
 
 ---
 

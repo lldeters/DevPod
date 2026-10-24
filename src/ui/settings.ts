@@ -10,6 +10,8 @@ export interface Settings {
   logLevel: 'info' | 'debug' | 'trace';
   promptToReopen: boolean;
   serverDownloadUrlTemplate: string | undefined;
+  kubectlPath: string | undefined;
+  kubeconfigPath: string | undefined;
 }
 
 function nonEmpty(value: string | undefined): string | undefined {
@@ -26,5 +28,7 @@ export function readSettings(): Settings {
     logLevel: config.get<Settings['logLevel']>('logLevel') ?? 'info',
     promptToReopen: config.get<boolean>('promptToReopen') ?? true,
     serverDownloadUrlTemplate: nonEmpty(config.get<string>('serverDownloadUrlTemplate')),
+    kubectlPath: nonEmpty(config.get<string>('kubectlPath')),
+    kubeconfigPath: nonEmpty(config.get<string>('kubeconfigPath')),
   };
 }

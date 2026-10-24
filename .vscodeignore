@@ -6,6 +6,6 @@
 !NOTICE
 !THIRD_PARTY_LICENSES.md
 !CHANGELOG.md
-!media/**
+!media/icon.png
 !node_modules/@devcontainers/cli/**
 !node_modules/jsonc-parser/package.json

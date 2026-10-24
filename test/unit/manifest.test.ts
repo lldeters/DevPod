@@ -14,6 +14,7 @@ interface Menu {
 const manifest = JSON.parse(
   readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'),
 ) as {
+  icon?: string;
   activationEvents: string[];
   contributes: {
     commands: { command: string; title: string }[];
@@ -25,6 +26,15 @@ const manifest = JSON.parse(
 const declared = new Set(manifest.contributes.commands.map((command) => command.command));
 
 describe('manifest', () => {
+  it('has a PNG icon that is packaged (registries do not accept SVG icons)', () => {
+    expect(manifest.icon).toBe('media/icon.png');
+    const png = readFileSync(path.join(__dirname, '..', '..', manifest.icon ?? ''));
+    expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect(png.readUInt32BE(16)).toBeGreaterThanOrEqual(128); // width
+    const ignore = readFileSync(path.join(__dirname, '..', '..', '.vscodeignore'), 'utf8');
+    expect(ignore.split('\n')).toContain(`!${manifest.icon}`);
+  });
+
   it('declares every command the code registers', () => {
     for (const id of Object.values(Commands)) {
       expect(declared.has(id), id).toBe(true);

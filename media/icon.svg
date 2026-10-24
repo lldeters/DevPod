@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Icon of Dev Containers for Kiro (Community). Source of media/icon.png; render at 256x256. -->
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#134e4a"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#background)"/>
+  <!-- the container: an isometric box, top face lit, right face shaded -->
+  <path d="M128 42 L206 85 L128 128 L50 85 Z" fill="#ffffff" fill-opacity="0.22"/>
+  <path d="M206 85 L206 171 L128 214 L128 128 Z" fill="#000000" fill-opacity="0.18"/>
+  <g fill="none" stroke="#ffffff" stroke-width="11" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M128 42 L206 85 L206 171 L128 214 L50 171 L50 85 Z"/>
+    <path d="M50 85 L128 128 L206 85"/>
+    <path d="M128 128 L128 214"/>
+  </g>
+  <!-- a shell prompt on the front left face, drawn in that face's plane -->
+  <g transform="matrix(1 0.5513 0 1 50 85)" fill="none" stroke="#ffffff" stroke-width="10"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 24 L33 38 L17 52"/>
+    <path d="M42 56 L62 56"/>
+  </g>
+</svg>

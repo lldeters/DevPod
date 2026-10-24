@@ -136,6 +136,20 @@ Set-Content $HOME\kiro-devcontainer-test\.devcontainer\devcontainer.json '{ "nam
 
 Öffne den Ordner `kiro-devcontainer-test` in Kiro (**Datei → Ordner öffnen…**).
 
+**Wichtig: Dem Ordner vertrauen.** Kiro öffnet neue Ordner zuerst im **„Restricted Mode“**. Du
+erkennst das am Banner oben („Restricted Mode is intended for safe code browsing. Trust this
+folder to enable all features.“) und am Eintrag „Restricted Mode“ unten links. In diesem Modus ist
+die Extension **absichtlich ausgeschaltet**: Ihre Befehle und Einstellungen sind unsichtbar, und
+die Einstellungssuche nach `dev.containers` findet nichts. Das ist ein Schutz, weil ein Dev
+Container Skripte aus dem Projekt ausführt.
+
+1. Klicke im Banner auf **„Manage“**.
+2. Bestätige, dass du dem Ordner vertraust (ein Button, der sinngemäß „Trust folder & enable all
+   features“ heißt). Das ist dein eigener Testordner, du kannst ihm vertrauen. Bei fremden Projekten
+   solltest du das nur tun, wenn du ihnen traust.
+3. Danach sollte unten links „Restricted Mode“ verschwinden. Falls die Befehle oder Einstellungen
+   nicht sofort erscheinen: Befehlspalette → **„Developer: Reload Window“**.
+
 ---
 
 ## Schritt 7: Im Container öffnen

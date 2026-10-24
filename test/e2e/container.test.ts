@@ -179,9 +179,12 @@ describe.skipIf(!enabled)('dev container end to end', () => {
     const config = upResult?.mergedConfiguration;
     if (!config) throw new Error('the CLI did not return a merged configuration');
 
+    // The merged configuration also contains what the image itself declares in its metadata
+    // (this Node image adds an ESLint extension and a Copilot setting), so only what this
+    // configuration asks for is asserted.
     const custom = extractCustomizations(config);
-    expect(custom.extensions).toEqual(['esbenp.prettier-vscode']);
-    expect(custom.settings).toEqual({ 'editor.tabSize': 3 });
+    expect(custom.extensions).toContain('esbenp.prettier-vscode');
+    expect(custom.settings).toMatchObject({ 'editor.tabSize': 3 });
     expect(extractForwardPorts(config).ports).toEqual([
       { host: 'localhost', port: 3000 },
       { host: 'db', port: 5432 },
@@ -233,7 +236,7 @@ describe.skipIf(!enabled)('dev container end to end', () => {
       user: 'node',
       command: ['cat', '/home/node/.e2e-server/data/Machine/settings.json'],
     });
-    expect(JSON.parse(settings.stdout)).toEqual({
+    expect(JSON.parse(settings.stdout)).toMatchObject({
       'remote.portsAttributes': { '3000': { label: 'App', onAutoForward: 'notify' } },
       'editor.tabSize': 3,
     });

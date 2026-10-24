@@ -10,6 +10,7 @@ import { discoverConfigs } from '../core/config/discovery';
 import { resolveAndValidateConfig } from '../core/config/validate';
 import type { DiscoveredConfig } from '../core/config/discovery';
 import { errorMessage } from '../core/errors';
+import type { KnownTargets } from '../remote/knownTargets';
 import type { RebuildRequests } from '../remote/rebuildRequests';
 import { showDiagnostics } from './diagnostics';
 import { attachToPod, resolveExplorerTarget } from './kubernetes';
@@ -42,6 +43,8 @@ export interface CommandServices {
   logger: OutputLogger;
   cli: DevContainerCli;
   rebuilds: RebuildRequests;
+  /** Records the windows these commands open, so the resolvers open them without asking. */
+  targets: Pick<KnownTargets, 'add'>;
   remoteSupport: RemoteSupport;
   kubectl: Kubectl;
   /** Replaceable in tests; by default the Kubernetes extension's API is used. */
@@ -140,6 +143,7 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
     );
 
     const authority = encodeAuthority({ hostPath, ...(configFile ? { configFile } : {}) });
+    await services.targets.add(authority);
     if (rebuild) {
       await rebuilds.request(authority, { noCache: false });
     }
@@ -227,6 +231,7 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
   const attachDependencies = {
     logger,
     kubectl: services.kubectl,
+    targets: services.targets,
     ensureRemoteSupport,
     resolveTarget: services.resolveExplorerTarget ?? resolveExplorerTarget,
   };

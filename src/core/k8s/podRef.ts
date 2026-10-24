@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as path from 'node:path';
+import { isNetworkPath } from '../authority';
 import { DevContainerError } from '../errors';
 
 /** Remote authority prefix for Kubernetes pods: `k8s-pod+<hex>`. */
@@ -44,6 +45,11 @@ export function assertPodRef(ref: PodRef): void {
       !(path.posix.isAbsolute(ref.kubeconfig) || path.win32.isAbsolute(ref.kubeconfig)))
   ) {
     fail('kubeconfig path');
+  }
+  // A kubeconfig decides which server kubectl talks to and can run commands (exec credential
+  // plugins), and reading one from a share already contacts that host.
+  if (ref.kubeconfig !== undefined && isNetworkPath(ref.kubeconfig)) {
+    fail('kubeconfig path (network shares are not supported)');
   }
 }
 

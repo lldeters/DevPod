@@ -7,6 +7,7 @@ import { checkContainerRunning } from '../core/k8s/attach';
 import type { Kubectl, PodInfo } from '../core/k8s/kubectl';
 import { encodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
+import type { KnownTargets } from '../remote/knownTargets';
 import { readSettings } from './settings';
 
 /** What a right-click in the Kubernetes explorer pointed at. */
@@ -71,6 +72,8 @@ export function effectiveKubeconfig(): string | undefined {
 export interface AttachDependencies {
   logger: Logger;
   kubectl: Kubectl;
+  /** Records the window this opens, so the pod resolver opens it without asking. */
+  targets: Pick<KnownTargets, 'add'>;
   /** False (after guiding the user) when the proposed API that remote windows need is not enabled. */
   ensureRemoteSupport: () => Promise<boolean>;
   resolveTarget: (target: unknown) => Promise<ExplorerTarget | undefined>;
@@ -222,6 +225,7 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
     ...(kubeconfig === undefined ? {} : { kubeconfig }),
   });
   deps.logger.log('info', `Attaching to ${namespace}/${podName} (${container}) in a new window`);
+  await deps.targets.add(authority);
   await vscode.commands.executeCommand('vscode.newWindow', {
     remoteAuthority: authority,
     reuseWindow: false,

@@ -25,11 +25,26 @@ function isAbsolute(candidate: string): boolean {
   return path.posix.isAbsolute(candidate) || path.win32.isAbsolute(candidate);
 }
 
+/**
+ * Windows network (UNC) and device paths such as `\\host\share` or `\\?\UNC\host\share`. Merely
+ * reading one contacts that host and can hand it the user's Windows credentials, so they are never
+ * accepted from an authority. The shares WSL provides for its distributions are local and allowed.
+ */
+export function isNetworkPath(candidate: string): boolean {
+  return /^[\\/]{2}/.test(candidate) && !/^[\\/]{2}(wsl\$|wsl\.localhost)[\\/]/i.test(candidate);
+}
+
 function assertPath(value: unknown, field: string): asserts value is string {
   if (typeof value !== 'string' || value === '' || value.includes('\0') || !isAbsolute(value)) {
     throw new DevContainerError(
       'AUTHORITY_INVALID',
       `The remote authority has an invalid ${field}.`,
+    );
+  }
+  if (isNetworkPath(value)) {
+    throw new DevContainerError(
+      'AUTHORITY_INVALID',
+      `The ${field} is on a network share (${value}), which is not supported.`,
     );
   }
 }

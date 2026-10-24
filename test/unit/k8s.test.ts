@@ -34,6 +34,15 @@ describe('pod authority', () => {
     expect(encodePodAuthority(ref)).toMatch(/^k8s-pod\+[0-9a-f]+$/);
   });
 
+  it('rejects a kubeconfig on a network share, but not one in WSL', () => {
+    expect(() =>
+      decodePodAuthority(hex({ v: 1, ...ref, kubeconfig: '\\\\attacker.example\\s\\config' })),
+    ).toThrowError(/network shares/);
+    expect(() => assertPodRef({ ...ref, kubeconfig: '//attacker.example/s/config' })).toThrow();
+    const wsl: PodRef = { ...ref, kubeconfig: '\\\\wsl$\\Ubuntu\\home\\me\\.kube\\config' };
+    expect(decodePodAuthority(encodePodAuthority(wsl))).toEqual(wsl);
+  });
+
   it('accepts real-world context names such as EKS ARNs', () => {
     const eks = 'arn:aws:eks:eu-west-1:123456789012:cluster/prod';
     expect(decodePodAuthority(encodePodAuthority({ ...ref, context: eks })).context).toBe(eks);

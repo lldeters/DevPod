@@ -11,6 +11,8 @@ import type { Logger } from '../core/logger';
 import type { ServerBuildInfo } from '../core/server/productInfo';
 import { provisionServer } from '../core/server/provisioner';
 import { createBridge } from './bridge';
+import { confirmTarget } from './knownTargets';
+import type { KnownTargets } from './knownTargets';
 import { TunnelHub } from './tunnelHub';
 
 export interface PodResolverDependencies {
@@ -19,6 +21,8 @@ export interface PodResolverDependencies {
   kubectl: Kubectl;
   /** Path of the kubectl binary used for `exec`; read for every connection. */
   kubectlPath: () => string;
+  /** Authorities opened by this extension; any other one is confirmed before it is used. */
+  targets: Pick<KnownTargets, 'has' | 'add'>;
   serverBuild: () => Promise<ServerBuildInfo>;
   serverUrlTemplate: () => string | undefined;
   /** This machine's Kiro sign-in to place in the pod, or `undefined` if it is not shared. */
@@ -67,6 +71,16 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
       `Attaching to ${ref.namespace}/${ref.pod} (container ${ref.container}${
         ref.context ? `, context ${ref.context}` : ''
       })`,
+    );
+    // Before kubectl runs: the kubeconfig decides which cluster is contacted, and it can run commands.
+    await confirmTarget(
+      this.deps.targets,
+      authority,
+      `Attach to the pod ${ref.namespace}/${ref.pod}?`,
+      `Pod: ${ref.namespace}/${ref.pod}\nContainer: ${ref.container}\n` +
+        `Context: ${ref.context ?? 'the current one'}\n` +
+        `kubeconfig: ${ref.kubeconfig ?? "kubectl's default"}\n\n` +
+        'This runs kubectl with that kubeconfig and installs the IDE server in the container.',
     );
 
     const build = await this.deps.serverBuild();

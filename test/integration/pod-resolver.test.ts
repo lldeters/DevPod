@@ -18,10 +18,12 @@ import * as net from 'node:net';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type * as vscode from 'vscode';
 import { Kubectl } from '../../src/core/k8s/kubectl';
 import { encodePodAuthority } from '../../src/core/k8s/podRef';
 import type { PodRef } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
+import { KnownTargets } from '../../src/remote/knownTargets';
 import { PodResolver } from '../../src/remote/podResolver';
 import { callLikeTheIde } from '../helpers/ide';
 import * as mock from '../helpers/vscodeMock';
@@ -29,6 +31,8 @@ import { createKubectlStub, podJson } from '../helpers/kubectlStub';
 import type { KubectlStub } from '../helpers/kubectlStub';
 
 const { state } = mock;
+/** For tests about what happens after a target is confirmed. */
+const allKnown = { has: () => true, add: async () => undefined };
 
 const hasTools = ['sh', 'curl', 'tar'].every(
   (tool) => spawnSync('sh', ['-c', `command -v ${tool}`]).status === 0,
@@ -131,6 +135,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
           () => undefined,
         ),
         kubectlPath: () => stub.path,
+        targets: allKnown,
         serverBuild: async () => build,
         serverUrlTemplate: () => `file://${archive}`,
         kiroLogin: async () => options.kiroLogin,
@@ -321,6 +326,29 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       });
     });
 
+    it('asks before attaching to a pod it did not open itself, without calling kubectl', async () => {
+      const logger = new MemoryLogger();
+      const resolver = new PodResolver({
+        logger,
+        kubectl: new Kubectl(
+          () => stub.path,
+          () => undefined,
+        ),
+        kubectlPath: () => stub.path,
+        targets: new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento),
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const linked = encodePodAuthority({ ...ref, kubeconfig: '/home/someone/Downloads/config' });
+
+      await expect(resolver.resolve(linked)).rejects.toMatchObject({ kind: 'NotAvailable' });
+      expect(state.warnings[0]?.message).toBe('Attach to the pod dev/mypod?');
+      expect(state.warnings[0]?.detail).toContain('kubeconfig: /home/someone/Downloads/config');
+      expect(await stub.calls()).toEqual([]);
+    });
+
     it('rejects an invalid authority without calling kubectl', async () => {
       const { resolver } = createResolver();
       await expect(resolver.resolve('k8s-pod+nothex')).rejects.toMatchObject({
@@ -338,6 +366,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
           () => undefined,
         ),
         kubectlPath: () => path.join(root, 'no-such-kubectl'),
+        targets: allKnown,
         serverBuild: async () => build,
         serverUrlTemplate: () => undefined,
         kiroLogin: async () => undefined,

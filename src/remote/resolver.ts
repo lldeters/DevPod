@@ -19,6 +19,8 @@ import type { ServerBuildInfo } from '../core/server/productInfo';
 import { provisionServer } from '../core/server/provisioner';
 import { DockerTarget } from '../core/exec/target';
 import { createBridge } from './bridge';
+import { confirmTarget } from './knownTargets';
+import type { KnownTargets } from './knownTargets';
 import type { RebuildRequests } from './rebuildRequests';
 import { TunnelHub } from './tunnelHub';
 
@@ -27,6 +29,8 @@ export interface ResolverDependencies {
   cli: DevContainerCli;
   engine: ContainerEngine;
   rebuilds: RebuildRequests;
+  /** Authorities opened by this extension; any other one is confirmed before it is used. */
+  targets: Pick<KnownTargets, 'has' | 'add'>;
   serverBuild: () => Promise<ServerBuildInfo>;
   serverUrlTemplate: () => string | undefined;
   /** This machine's Kiro sign-in to place in the container, or `undefined` if it is not shared. */
@@ -83,6 +87,15 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
     logger.log(
       'info',
       `Opening ${params.hostPath}${params.configFile ? ` (${params.configFile})` : ''}`,
+    );
+    // Before anything reads the folder: its configuration runs commands, some on this machine.
+    await confirmTarget(
+      this.deps.targets,
+      authority,
+      `Open the folder ${params.hostPath} in a dev container?`,
+      `Folder: ${params.hostPath}\nConfiguration: ${params.configFile ?? 'the default one'}\n\n` +
+        'This builds and starts the container its configuration describes and runs its commands, ' +
+        'including initializeCommand on this computer.',
     );
 
     await resolveAndValidateConfig(params.hostPath, params.configFile);

@@ -3,6 +3,7 @@ import {
   decodeAuthority,
   encodeAuthority,
   isDevContainerAuthority,
+  isNetworkPath,
 } from '../../src/core/authority';
 
 const hex = (value: unknown): string =>
@@ -53,5 +54,34 @@ describe('authority', () => {
 
   it('refuses to encode an invalid path', () => {
     expect(() => encodeAuthority({ hostPath: 'relative' })).toThrow();
+  });
+
+  // Reading a network path contacts that host (and can hand it Windows credentials).
+  it.each([
+    '\\\\attacker.example\\share\\repo',
+    '//attacker.example/share/repo',
+    '\\\\?\\UNC\\host\\share',
+    '\\\\.\\pipe\\x',
+  ])('rejects the network path %s', (hostPath) => {
+    expect(() => decodeAuthority(hex({ v: 1, hostPath }))).toThrowError(/network share/);
+    expect(() => decodeAuthority(hex({ v: 1, hostPath: '/x', configFile: hostPath }))).toThrowError(
+      /network share/,
+    );
+    expect(() => encodeAuthority({ hostPath })).toThrowError(/network share/);
+  });
+
+  it('accepts the local shares of WSL distributions', () => {
+    for (const hostPath of [
+      '\\\\wsl$\\Ubuntu\\home\\me\\app',
+      '\\\\wsl.localhost\\Ubuntu\\home\\me',
+    ]) {
+      expect(decodeAuthority(encodeAuthority({ hostPath }))).toEqual({ hostPath });
+    }
+  });
+
+  it('knows which paths are network paths', () => {
+    expect(isNetworkPath('C:\\Users\\me')).toBe(false);
+    expect(isNetworkPath('/home/me')).toBe(false);
+    expect(isNetworkPath('\\\\server\\share')).toBe(true);
   });
 });

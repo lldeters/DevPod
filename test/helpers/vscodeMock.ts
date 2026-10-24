@@ -28,6 +28,10 @@ export const state = {
   openedDocuments: [] as { language?: string; content?: string }[],
   remoteAuthority: undefined as string | undefined,
   inputBoxValue: undefined as string | undefined,
+  /** Modal warnings shown (`showWarningMessage`), with their detail text. */
+  warnings: [] as { message: string; detail: string | undefined }[],
+  /** Which button a warning is answered with; `undefined` dismisses it. */
+  answerWarning: (_message: string): string | undefined => undefined,
 };
 
 export function reset(): void {
@@ -50,6 +54,8 @@ export function reset(): void {
   state.openedDocuments = [];
   state.remoteAuthority = undefined;
   state.inputBoxValue = undefined;
+  state.warnings = [];
+  state.answerWarning = () => undefined;
 }
 
 export class Uri {
@@ -166,6 +172,13 @@ export const window = {
   showInformationMessage: async (message: string): Promise<string | undefined> => {
     state.infoMessages.push(message);
     return state.nextChoice;
+  },
+  showWarningMessage: async (
+    message: string,
+    options?: { detail?: string },
+  ): Promise<string | undefined> => {
+    state.warnings.push({ message, detail: options?.detail });
+    return state.answerWarning(message);
   },
   showErrorMessage: async (message: string): Promise<string | undefined> => {
     state.errorMessages.push(message);

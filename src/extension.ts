@@ -13,6 +13,7 @@ import { POD_AUTHORITY_PREFIX } from './core/k8s/podRef';
 import { readLocalLoginFile } from './core/server/kiroLogin';
 import { PodResolver } from './remote/podResolver';
 import { readServerBuildInfo } from './remote/product';
+import { KnownTargets } from './remote/knownTargets';
 import { RebuildRequests } from './remote/rebuildRequests';
 import { DevContainerResolver } from './remote/resolver';
 import { registerCommands } from './ui/commands';
@@ -53,6 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
   const rebuilds = new RebuildRequests(context.globalState);
+  const targets = new KnownTargets(context.globalState);
 
   // The sign-in is read for every connection, and only when the user has chosen to share it.
   const kiroLogin = async (): Promise<string | undefined> =>
@@ -67,6 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
     cli,
     engine,
     rebuilds,
+    targets,
     serverBuild: readServerBuildInfo,
     serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
     kiroLogin,
@@ -78,6 +81,7 @@ export function activate(context: vscode.ExtensionContext): void {
     logger,
     kubectl,
     kubectlPath: effectiveKubectlPath,
+    targets,
     serverBuild: readServerBuildInfo,
     serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
     kiroLogin,
@@ -104,6 +108,7 @@ export function activate(context: vscode.ExtensionContext): void {
       logger: output,
       cli,
       rebuilds,
+      targets,
       remoteSupport,
       kubectl,
     }),

@@ -3,9 +3,11 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type * as vscode from 'vscode';
 import { Kubectl } from '../../src/core/k8s/kubectl';
 import { decodePodAuthority } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
+import { KnownTargets } from '../../src/remote/knownTargets';
 import { attachToPod, effectiveKubeconfig, effectiveKubectlPath } from '../../src/ui/kubernetes';
 import type { AttachDependencies, ExplorerTarget } from '../../src/ui/kubernetes';
 import * as mock from '../helpers/vscodeMock';
@@ -16,6 +18,7 @@ const { state } = mock;
 
 let root: string;
 let stub: KubectlStub;
+let targets: KnownTargets;
 
 beforeAll(async () => {
   root = await realpath(await mkdtemp(path.join(tmpdir(), 'dck-attach-')));
@@ -30,6 +33,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   mock.reset();
+  targets = new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento);
   await stub.reset();
   await stub.set('current-context', 'kind-test');
   await stub.set('pod.json', podJson());
@@ -44,6 +48,7 @@ function dependencies(
       () => stub.path,
       () => effectiveKubeconfig(),
     ),
+    targets,
     ensureRemoteSupport: async () => options.supported ?? true,
     resolveTarget: async () => options.target,
   };
@@ -70,6 +75,8 @@ describe('attach from the Kubernetes explorer', () => {
     });
     expect(state.errorMessages).toEqual([]);
     expect(state.quickPickCalls).toHaveLength(0); // a single running container needs no question
+    // the new window resolves this authority without asking, since it was opened from here
+    expect(targets.has(window?.remoteAuthority ?? '')).toBe(true);
   });
 
   it('asks which container when there are several, offering the pod default first', async () => {

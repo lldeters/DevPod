@@ -18,6 +18,7 @@ import type { RunResult } from '../../src/core/process';
 import { PLATFORM_MARKER } from '../../src/core/server/platform';
 import { INSTALL_MARKER } from '../../src/core/server/script';
 import { activate } from '../../src/extension';
+import { KnownTargets } from '../../src/remote/knownTargets';
 import { RebuildRequests } from '../../src/remote/rebuildRequests';
 import { DevContainerResolver } from '../../src/remote/resolver';
 import { Commands } from '../../src/ui/commands';
@@ -25,6 +26,8 @@ import { callLikeTheIde } from '../helpers/ide';
 import * as mock from '../helpers/vscodeMock';
 
 const { state } = mock;
+/** For tests about what happens after a target is confirmed. */
+const allKnown = { has: () => true, add: async () => undefined };
 const EXTENSION_ID = 'lldeters.devcontainers-kiro';
 
 let root: string;
@@ -113,7 +116,7 @@ describe('activation', () => {
 describe('Reopen in Container', () => {
   it('opens the remote folder at the path the Dev Container CLI reports (Git root aware)', async () => {
     openWorkspace(mock.Uri.file(sub));
-    activateExtension();
+    const { globalState } = activateExtension();
 
     await mock.commands.executeCommand(Commands.reopenInContainer);
 
@@ -123,6 +126,10 @@ describe('Reopen in Container', () => {
     expect(decodeAuthority(uri.authority)).toEqual({ hostPath: sub }); // default location: no configFile
     expect(options).toEqual({ forceReuseWindow: true });
     expect(state.errorMessages).toEqual([]);
+    // the reloaded window resolves this authority without asking, since it was opened from here
+    expect(new KnownTargets(globalState as unknown as vscode.Memento).has(uri.authority)).toBe(
+      true,
+    );
   });
 
   it('lets the user choose between several configurations and remembers the choice', async () => {
@@ -267,7 +274,7 @@ describe('DevContainerResolver', () => {
     `${INSTALL_MARKER}: start\nserverDir==/home/vscode/.kiro-server/bin/abc123\nport==41000\ntoken==secret-token\nnode==/n\nlog==/l\n${INSTALL_MARKER}: end\n`,
   );
 
-  function setup(options: { engineError?: Error } = {}) {
+  function setup(options: { engineError?: Error; targets?: KnownTargets } = {}) {
     const upCalls: Record<string, unknown>[] = [];
     const results = [platform, installed, platform, installed];
     const cli = {
@@ -295,6 +302,7 @@ describe('DevContainerResolver', () => {
       cli,
       engine,
       rebuilds,
+      targets: options.targets ?? allKnown,
       serverBuild: async () => build,
       serverUrlTemplate: () => undefined,
       kiroLogin: async () => undefined,
@@ -334,6 +342,36 @@ describe('DevContainerResolver', () => {
       kind: 'NotAvailable',
       message: expect.stringContaining('remote authority'),
     });
+  });
+
+  it('asks before opening a folder it did not open itself, and touches nothing on "no"', async () => {
+    const targets = new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento);
+    const { resolver, upCalls } = setup({ targets });
+    const authority = encodeAuthority({ hostPath: path.join(root, 'from-a-link') });
+
+    await expect(resolver.resolve(authority)).rejects.toMatchObject({
+      kind: 'NotAvailable',
+      message: expect.stringContaining('not confirmed'),
+    });
+    expect(state.warnings).toHaveLength(1);
+    expect(state.warnings[0]?.message).toContain(path.join(root, 'from-a-link'));
+    expect(state.warnings[0]?.detail).toMatch(/initializeCommand on this computer/);
+    expect(upCalls).toHaveLength(0);
+    expect(targets.has(authority)).toBe(false);
+  });
+
+  it('opens a confirmed folder and does not ask again', async () => {
+    const targets = new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento);
+    const { resolver, upCalls } = setup({ targets });
+    const authority = encodeAuthority({ hostPath: sub });
+    state.answerWarning = () => 'Open';
+
+    await resolver.resolve(authority);
+    await resolver.resolve(authority);
+
+    expect(state.warnings).toHaveLength(1);
+    expect(upCalls).toHaveLength(2);
+    expect(targets.has(authority)).toBe(true);
   });
 
   it('passes the engine problem through to the user', async () => {
@@ -518,6 +556,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
       cli,
       engine,
       rebuilds: new RebuildRequests(new mock.MockMemento() as unknown as vscode.Memento),
+      targets: allKnown,
       serverBuild: async () => build,
       serverUrlTemplate: () => undefined,
       kiroLogin: async () => options.kiroLogin,

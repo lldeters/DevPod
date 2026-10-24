@@ -18,16 +18,12 @@ results (and the log) in an issue.
 
 ### 0. Collect facts
 
-Find Kiro's `product.json` (it sits next to the app resources, in `resources/app/product.json`
-of the installation) and share these fields (no secrets are in them):
-
-```sh
-# Linux/macOS example - adjust the path to your installation
-node -e "const p=require('/path/to/Kiro/resources/app/product.json'); console.log(JSON.stringify({
-  commit:p.commit, quality:p.quality, version:p.version, dataFolderName:p.dataFolderName,
-  serverApplicationName:p.serverApplicationName, serverDataFolderName:p.serverDataFolderName,
-  serverDownloadUrlTemplate:p.serverDownloadUrlTemplate, nameShort:p.nameShort }, null, 2))"
-```
+Run **Kiro Dev Containers: Show Diagnostics (copy to clipboard)** and paste the result into your
+report. It contains the IDE facts that decide whether a matching server can be installed
+(`commit`, `version`, `serverApplicationName`, `serverDataFolderName`, `serverDownloadUrlTemplate`,
+`updateUrl`, ...), whether remote support is active, and the versions of the container engine and
+the Dev Container CLI. Credential-like keys are never copied and your home directory is shortened
+to `~`. The command works even while remote support is still disabled.
 
 ### 1. Install and enable
 

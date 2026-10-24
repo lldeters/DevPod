@@ -1,6 +1,6 @@
 // Runs the real, pinned @devcontainers/cli. A tiny docker stub (answers "no containers") lets
 // `read-configuration` run without a container engine, so these tests work anywhere with Node.
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -78,6 +78,20 @@ describe('flags emitted by the argument builders exist in the pinned CLI', () =>
     for (const flag of flagsOf(args)) {
       expect(text, flag).toContain(flag);
     }
+  });
+});
+
+describe('DevContainerCli.version (real CLI)', () => {
+  it('reports the pinned version', async () => {
+    const cli = new DevContainerCli(
+      () => resolveCliLocation({ bundledEntry: cliEntry, nodeExecutable: node }),
+      new MemoryLogger(),
+    );
+    const manifest = JSON.parse(
+      await readFile(require.resolve('@devcontainers/cli/package.json'), 'utf8'),
+    ) as { version: string };
+    const pinned = manifest.version;
+    expect(await cli.version()).toBe(pinned);
   });
 });
 

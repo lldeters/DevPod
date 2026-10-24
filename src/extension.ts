@@ -66,6 +66,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     ...registerCommands({
       extensionId: context.extension.id,
+      extensionVersion:
+        (context.extension.packageJSON as { version?: string } | undefined)?.version ?? 'unknown',
+      engine,
       logger: output,
       cli,
       rebuilds,

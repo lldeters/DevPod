@@ -93,6 +93,11 @@
         "command": "devcontainersKiro.showContainerMenu",
         "title": "Show Container Actions",
         "category": "Kiro Dev Containers"
+      },
+      {
+        "command": "devcontainersKiro.showDiagnostics",
+        "title": "Show Diagnostics (copy to clipboard)",
+        "category": "Kiro Dev Containers"
       }
     ],
     "menus": {

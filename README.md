@@ -42,7 +42,9 @@ hosts and more. See [docs/PLAN.md](docs/PLAN.md).
 2. Run **Kiro Dev Containers: Enable Remote Support (proposed API)**. This adds this extension's
    ID to `enable-proposed-api` in the IDE's `argv.json` after you confirm. Quit and restart the
    IDE completely.
-3. If the IDE does not declare where its server can be downloaded, set
+3. Run **Kiro Dev Containers: Show Diagnostics** if something does not work; it copies the facts
+   needed to analyze the problem (no credentials) to the clipboard.
+4. If the IDE does not declare where its server can be downloaded, set
    `dev.containers.serverDownloadUrlTemplate` (see below). The extension tells you when this is
    needed.
 

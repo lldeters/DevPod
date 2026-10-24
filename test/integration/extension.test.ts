@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Exercises the editor-facing layers (activation, commands, resolver) against a stand-in for the
 // `vscode` module (see test/helpers/vscodeMock.ts). Commands run the real, pinned Dev Container
 // CLI with a docker stub, so the path computed for "Reopen in Container" is the CLI's own answer.
@@ -5,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as vscode from 'vscode';
 import { decodeAuthority, encodeAuthority } from '../../src/core/authority';
 import type { DevContainerCli } from '../../src/core/cli/devcontainerCli';
@@ -303,5 +304,81 @@ describe('DevContainerResolver', () => {
       message: 'Docker is not running',
     });
     expect(upCalls).toHaveLength(0);
+  });
+});
+
+describe('Show Diagnostics', () => {
+  let productDir: string;
+  let portableDir: string;
+
+  beforeAll(async () => {
+    productDir = path.join(root, 'app');
+    portableDir = path.join(root, 'portable');
+    await mkdir(productDir, { recursive: true });
+    await mkdir(portableDir, { recursive: true });
+    await writeFile(
+      path.join(productDir, 'product.json'),
+      JSON.stringify({
+        nameShort: 'Kiro',
+        version: '1.103.2',
+        commit: 'abc123',
+        quality: 'stable',
+        dataFolderName: '.kiro',
+        serverApplicationName: 'kiro-server',
+        serverDataFolderName: '.kiro-server',
+        updateUrl: 'https://update.example/api',
+        updateApiKey: 'SECRET-VALUE',
+        unrelated: 'nope',
+      }),
+    );
+    await writeFile(
+      path.join(portableDir, 'argv.json'),
+      '{ // comment\n "enable-proposed-api": ["lldeters.devcontainers-kiro"] }',
+    );
+  });
+
+  afterEach(() => {
+    delete process.env['VSCODE_PORTABLE'];
+  });
+
+  it('copies a credential-free report with the facts needed for server support', async () => {
+    process.env['VSCODE_PORTABLE'] = portableDir; // keeps the test away from the real argv.json
+    state.appRoot = productDir;
+    activateExtension();
+
+    await mock.commands.executeCommand(Commands.showDiagnostics);
+
+    const report = JSON.parse(state.clipboard) as Record<string, any>;
+    expect(report['extension']).toMatchObject({ id: EXTENSION_ID });
+    expect(report['ide']).toMatchObject({ appName: 'Kiro', vscodeVersion: '1.103.2' });
+    expect(report['product'].values).toMatchObject({
+      commit: 'abc123',
+      serverApplicationName: 'kiro-server',
+      serverDataFolderName: '.kiro-server',
+      updateUrl: 'https://update.example/api',
+    });
+    expect(report['remoteSupport']).toEqual({ enabled: true, problem: null });
+    expect(report['argvJson'].listsThisExtension).toBe(true);
+    expect(report['devcontainerCli'].version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(report['settings'].serverDownloadUrlTemplate).toBe('unset');
+    expect(state.clipboard).not.toContain('SECRET-VALUE');
+    expect(state.clipboard).not.toContain('unrelated');
+    expect(state.openedDocuments).toHaveLength(1);
+    expect(state.infoMessages.join('\n')).toMatch(/copied to the clipboard/);
+  });
+
+  it('still produces a report when the IDE facts cannot be read', async () => {
+    process.env['VSCODE_PORTABLE'] = path.join(root, 'nowhere');
+    state.appRoot = path.join(root, 'does-not-exist');
+    state.settings['dev.containers.dockerPath'] = path.join(root, 'no-such-docker');
+    activateExtension();
+
+    await mock.commands.executeCommand(Commands.showDiagnostics);
+
+    const report = JSON.parse(state.clipboard) as Record<string, any>;
+    expect(report['product'].error).toMatch(/ENOENT|no such file/i);
+    expect(report['containerEngine'].version.error).toMatch(/Could not run|not reachable/);
+    expect(report['argvJson'].listsThisExtension).toBe(false);
+    expect(state.errorMessages).toEqual([]);
   });
 });

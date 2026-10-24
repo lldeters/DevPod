@@ -4,11 +4,13 @@
 import * as vscode from 'vscode';
 import { decodeAuthority, encodeAuthority } from '../core/authority';
 import type { DevContainerCli } from '../core/cli/devcontainerCli';
+import type { ContainerEngine } from '../core/engine/containerEngine';
 import { discoverConfigs } from '../core/config/discovery';
 import { resolveAndValidateConfig } from '../core/config/validate';
 import type { DiscoveredConfig } from '../core/config/discovery';
 import { errorMessage } from '../core/errors';
 import type { RebuildRequests } from '../remote/rebuildRequests';
+import { showDiagnostics } from './diagnostics';
 import type { OutputLogger } from './logging';
 import { currentAuthority, localWorkspaceFolder } from './remoteState';
 import type { RemoteSupport } from './remoteState';
@@ -24,10 +26,13 @@ export const Commands = {
   showLog: 'devcontainersKiro.showLog',
   showContainerMenu: 'devcontainersKiro.showContainerMenu',
   setupRemoteSupport: 'devcontainersKiro.setupRemoteSupport',
+  showDiagnostics: 'devcontainersKiro.showDiagnostics',
 } as const;
 
 export interface CommandServices {
   extensionId: string;
+  extensionVersion: string;
+  engine: ContainerEngine;
   logger: OutputLogger;
   cli: DevContainerCli;
   rebuilds: RebuildRequests;
@@ -215,5 +220,14 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
     register(Commands.showLog, () => logger.show()),
     register(Commands.showContainerMenu, showContainerMenu),
     register(Commands.setupRemoteSupport, () => setupRemoteSupport(services.extensionId, logger)),
+    register(Commands.showDiagnostics, () =>
+      showDiagnostics({
+        extensionId: services.extensionId,
+        extensionVersion: services.extensionVersion,
+        engine: services.engine,
+        cli,
+        remoteSupport,
+      }),
+    ),
   ];
 }

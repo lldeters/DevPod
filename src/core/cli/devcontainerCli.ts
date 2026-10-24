@@ -51,6 +51,21 @@ export class DevContainerCli {
     private readonly defaults: () => Defaults = () => ({}),
   ) {}
 
+  /** The CLI's version string, e.g. "0.89.0". */
+  async version(): Promise<string> {
+    const location = this.location();
+    const result = await runProcess(location.command, [...location.args, '--version'], {
+      env: { ...process.env, ...location.env },
+    });
+    if (result.code !== 0) {
+      throw new DevContainerError(
+        'CLI_FAILED',
+        `"${location.command} --version" exited with code ${result.code ?? 'unknown'}.`,
+      );
+    }
+    return result.stdout.trim();
+  }
+
   /** Creates (or reuses) the dev container and runs its lifecycle commands. */
   async up(options: UpOptions, handlers: CliRunHandlers = {}): Promise<UpSuccess> {
     const stdout = await this.run(upArgs({ ...this.defaults(), ...options }), handlers);

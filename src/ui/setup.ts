@@ -11,7 +11,7 @@ import type { Logger } from '../core/logger';
 import { readProduct } from '../remote/product';
 
 /** Same rule the IDE uses: portable install, else ~/<dataFolderName>/argv.json. */
-async function argvJsonPath(): Promise<string | undefined> {
+export async function argvJsonPath(): Promise<string | undefined> {
   const portable = process.env['VSCODE_PORTABLE'];
   if (portable) {
     return path.join(portable, 'argv.json');
@@ -22,7 +22,7 @@ async function argvJsonPath(): Promise<string | undefined> {
     : undefined;
 }
 
-async function readIfExists(file: string): Promise<string> {
+export async function readIfExists(file: string): Promise<string> {
   try {
     return await readFile(file, 'utf8');
   } catch (error) {

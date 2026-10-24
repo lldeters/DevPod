@@ -22,6 +22,8 @@ export const state = {
   appRoot: '/nonexistent',
   remoteName: undefined as string | undefined,
   statusBarItems: [] as { text: string; command?: string; visible: boolean }[],
+  clipboard: '',
+  openedDocuments: [] as { language?: string; content?: string }[],
 };
 
 export function reset(): void {
@@ -39,6 +41,8 @@ export function reset(): void {
   state.appRoot = '/nonexistent';
   state.remoteName = undefined;
   state.statusBarItems = [];
+  state.clipboard = '';
+  state.openedDocuments = [];
 }
 
 export class Uri {
@@ -182,6 +186,10 @@ export const workspace = {
       state.settings[`${section}.${key}`] = value;
     },
   }),
+  openTextDocument: async (options: { language?: string; content?: string }) => {
+    state.openedDocuments.push(options);
+    return options;
+  },
   registerRemoteAuthorityResolver(prefix: string, resolver: unknown): Disposable {
     if (!state.resolverApiEnabled) {
       throw new Error("Extension 'x' CANNOT use API proposal: resolvers.");
@@ -191,7 +199,15 @@ export const workspace = {
   },
 };
 
+export const version = '1.103.2';
+
 export const env = {
+  appName: 'Kiro',
+  clipboard: {
+    writeText: async (text: string): Promise<void> => {
+      state.clipboard = text;
+    },
+  },
   get appRoot() {
     return state.appRoot;
   },

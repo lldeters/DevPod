@@ -112,6 +112,12 @@ export async function openTunnel(
     await listen(server, 0);
   }
 
+  // A later server error (for example running out of file descriptors) must not become an uncaught
+  // exception in the extension host.
+  server.on('error', (error) => {
+    logger.log('warn', `Forwarding of ${host}:${remote.port} failed: ${error.message}`);
+  });
+
   const { port } = server.address() as net.AddressInfo;
   return {
     local: { host: '127.0.0.1', port },

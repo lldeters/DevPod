@@ -3,6 +3,7 @@ import {
   parseCliLogLine,
   parseReadConfigurationResult,
   parseUpResult,
+  redactEnvValues,
 } from '../../src/core/cli/output';
 import type { DevContainerError } from '../../src/core/errors';
 
@@ -34,6 +35,35 @@ describe('parseCliLogLine', () => {
       text: 'Step 1/5 : FROM ubuntu',
     });
     expect(parseCliLogLine('{"unrelated":true}').kind).toBe('raw');
+  });
+});
+
+describe('redactEnvValues', () => {
+  it('masks the values of env and build arguments but keeps the names', () => {
+    expect(
+      redactEnvValues(
+        'Run: docker run --sig-proxy=false -e NPM_TOKEN=npm_abc123 -e EMPTY= --env=A=b --env B=c ubuntu',
+      ),
+    ).toBe(
+      'Run: docker run --sig-proxy=false -e NPM_TOKEN=*** -e EMPTY=*** --env=A=*** --env B=*** ubuntu',
+    );
+    expect(redactEnvValues('docker build --build-arg TOKEN=s3cr3t .')).toBe(
+      'docker build --build-arg TOKEN=*** .',
+    );
+    expect(redactEnvValues('devcontainer up --remote-env KEY=value')).toBe(
+      'devcontainer up --remote-env KEY=***',
+    );
+  });
+
+  it('leaves other arguments alone', () => {
+    const line = 'Run: docker run -e HOME --label devcontainer.local_folder=/x --name=y -u vscode';
+    expect(redactEnvValues(line)).toBe(line);
+  });
+
+  it('applies to the log lines of the CLI', () => {
+    expect(
+      parseCliLogLine('{"type":"start","level":2,"text":"Run: docker run -e API_KEY=k1 img"}').text,
+    ).toBe('Run: docker run -e API_KEY=*** img');
   });
 });
 

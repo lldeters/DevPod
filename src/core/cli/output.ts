@@ -32,8 +32,18 @@ function mapLevel(level: unknown): LogLevel {
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
+// At debug level the CLI logs every command it runs, e.g. `docker run ... -e NPM_TOKEN=...` for
+// containerEnv, which often carries secrets from ${localEnv:...}. The values are masked; the names
+// stay, since they help when analyzing a log. (A value with spaces is only masked up to the first.)
+const ENV_ARGUMENT = /(^|\s)(-e|--env|--build-arg|--remote-env)(\s+|=)([^\s=]+)=\S*/g;
+
+/** Masks the values of environment and build arguments in a logged command line. */
+export function redactEnvValues(text: string): string {
+  return text.replace(ENV_ARGUMENT, '$1$2$3$4=***');
+}
+
 function clean(text: string): string {
-  return text.replace(ANSI_ESCAPE, '');
+  return redactEnvValues(text.replace(ANSI_ESCAPE, ''));
 }
 
 export function parseCliLogLine(line: string): CliLogEvent {

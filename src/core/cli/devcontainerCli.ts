@@ -6,7 +6,12 @@ import type { Logger } from '../logger';
 import { runProcess } from '../process';
 import { readConfigurationArgs, upArgs } from './args';
 import type { ReadConfigurationOptions, UpOptions } from './args';
-import { parseCliLogLine, parseReadConfigurationResult, parseUpResult } from './output';
+import {
+  parseCliLogLine,
+  parseReadConfigurationResult,
+  parseUpResult,
+  redactEnvValues,
+} from './output';
 import type { CliLogEvent, ReadConfigurationResult, UpSuccess } from './output';
 
 /** How to launch the Dev Container CLI. */
@@ -85,7 +90,7 @@ export class DevContainerCli {
   }
 
   private async run(args: string[], handlers: CliRunHandlers): Promise<string> {
-    this.logger.log('debug', `devcontainer ${args.join(' ')}`);
+    this.logger.log('debug', redactEnvValues(`devcontainer ${args.join(' ')}`));
     const forwardLog = (line: string): void => {
       const event = parseCliLogLine(line);
       this.logger.log(event.level, event.text);

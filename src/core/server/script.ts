@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DevContainerError } from '../errors';
+import { isValidExtensionId } from '../extensionId';
 
 export const INSTALL_MARKER = 'devcontainers-kiro-server';
 
@@ -32,10 +33,15 @@ export interface InstallScriptParams {
   stripComponents?: number;
   /** Flags passed to the server launcher in addition to the ones this extension requires. */
   extraServerArgs?: readonly string[];
+  /**
+   * Extensions the server installs when it is started. They are not installed again while a
+   * server is already running (a rebuilt container starts a fresh server).
+   */
+  extensions?: readonly string[];
 }
 
-// UNVERIFIED against a real Kiro server build: these flags follow the public VS Code remote
-// extension host CLI (`--start-server`, `--connection-token-file`). See docs/ARCHITECTURE.md.
+// These flags follow the public VS Code remote extension host CLI and were confirmed against
+// Kiro 1.4.26's server (see docs/ARCHITECTURE.md). `--install-extension` is part of the same CLI.
 const REQUIRED_SERVER_ARGS = [
   '--start-server',
   '--host=127.0.0.1',
@@ -57,7 +63,16 @@ export function buildInstallScript(params: InstallScriptParams): string {
   if (!Number.isInteger(strip) || strip < 0 || strip > 5) {
     throw new DevContainerError('SERVER_UNSUPPORTED', 'Invalid archive strip depth.');
   }
-  const serverArgs = [...REQUIRED_SERVER_ARGS, ...(params.extraServerArgs ?? [])]
+  const extensionArgs = (params.extensions ?? []).flatMap((id) => {
+    if (!isValidExtensionId(id)) {
+      throw new DevContainerError(
+        'SERVER_UNSUPPORTED',
+        `Not a valid extension id: ${JSON.stringify(id)}`,
+      );
+    }
+    return ['--install-extension', id];
+  });
+  const serverArgs = [...REQUIRED_SERVER_ARGS, ...extensionArgs, ...(params.extraServerArgs ?? [])]
     .map(shQuote)
     .join(' ');
 
@@ -198,14 +213,18 @@ export function parseInstallResult(output: string): InstallResult {
 }
 
 /**
- * JavaScript run with the container's Node binary: it relays stdin/stdout to the server port.
- * The port is passed as the first argument and validated here, not interpolated.
+ * JavaScript run with the container's Node binary: it relays stdin/stdout to a TCP port. The port
+ * is the first argument and the optional host (default 127.0.0.1) the second; both are validated
+ * here, never interpolated into the script. The host lets port forwarding reach another container
+ * of a Compose project from the one that is executed in.
  */
 export const BRIDGE_SCRIPT = [
   "const net = require('net');",
   'const port = Number(process.argv[1]);',
-  'if (!Number.isInteger(port)) process.exit(2);',
-  "const socket = net.connect(port, '127.0.0.1');",
+  "const host = process.argv[2] || '127.0.0.1';",
+  'if (!Number.isInteger(port) || port < 1 || port > 65535) process.exit(2);',
+  'if (!/^[A-Za-z0-9._:-]{1,253}$/.test(host)) process.exit(2);',
+  'const socket = net.connect(port, host);',
   'process.stdin.pipe(socket);',
   'socket.pipe(process.stdout);',
   "socket.on('close', () => process.exit(0));",

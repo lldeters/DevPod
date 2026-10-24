@@ -122,3 +122,113 @@ describe('provisionServer', () => {
     });
   });
 });
+
+/**
+ * A fake container: answers each script by its content and keeps the settings file in memory, so
+ * the read-merge-write cycle can be observed end to end.
+ */
+function fakeContainer(initialSettings = '') {
+  let settingsFile = initialSettings;
+  const scripts: string[] = [];
+  const executor: ServerExecutor = {
+    exec: (options) => {
+      const script = options.stdin ?? '';
+      scripts.push(script);
+      if (script.includes(`${PLATFORM_MARKER}: start`)) return Promise.resolve(platformOut);
+      if (script.includes(`${INSTALL_MARKER}: start`)) return Promise.resolve(installOut);
+      if (script.startsWith('cat ')) return Promise.resolve(ok(settingsFile));
+      const heredoc = /<<'(DCK_[0-9a-f]+)'\n([\s\S]*?)\n\1\n/.exec(script);
+      if (heredoc) settingsFile = `${heredoc[2]}\n`;
+      return Promise.resolve(ok(''));
+    },
+  };
+  return { executor, scripts, settings: () => settingsFile };
+}
+
+describe('provisionServer with extensions and settings', () => {
+  const input = { containerId: 'c1', user: 'vscode', build };
+
+  it('does nothing extra when the configuration asks for neither', async () => {
+    const container = fakeContainer();
+    await provisionServer(container.executor, input, new MemoryLogger());
+    expect(container.scripts).toHaveLength(2); // platform + install
+    expect(container.scripts[1]).not.toContain('--install-extension');
+  });
+
+  it('starts the server with the requested extensions', async () => {
+    const container = fakeContainer();
+    await provisionServer(
+      container.executor,
+      { ...input, extensions: ['esbenp.prettier-vscode', 'redhat.vscode-yaml'] },
+      new MemoryLogger(),
+    );
+    const install = container.scripts.at(-1) ?? '';
+    expect(install).toContain("'--install-extension' 'esbenp.prettier-vscode'");
+    expect(install).toContain("'--install-extension' 'redhat.vscode-yaml'");
+  });
+
+  it('writes the settings below the server data folder before starting the server', async () => {
+    const container = fakeContainer();
+    await provisionServer(
+      container.executor,
+      { ...input, settings: { 'editor.tabSize': 2 } },
+      new MemoryLogger(),
+    );
+    expect(container.scripts).toHaveLength(4); // platform, read, write, install
+    expect(container.scripts[1]).toContain(
+      "'/home/vscode/.kiro-server/data/Machine/settings.json'",
+    );
+    expect(JSON.parse(container.settings())).toEqual({ 'editor.tabSize': 2 });
+    expect(container.scripts[3]).toContain(`${INSTALL_MARKER}: start`);
+  });
+
+  it('keeps what is already in the container settings and overrides only the given keys', async () => {
+    const container = fakeContainer(
+      '{\n  // mine\n  "files.autoSave": "off",\n  "editor.tabSize": 8\n}\n',
+    );
+    await provisionServer(
+      container.executor,
+      { ...input, settings: { 'editor.tabSize': 2 } },
+      new MemoryLogger(),
+    );
+    expect(container.settings()).toContain('// mine');
+    expect(container.settings()).toContain('"files.autoSave": "off"');
+    expect(container.settings()).toContain('"editor.tabSize": 2');
+  });
+
+  it('skips the write when the settings are already up to date', async () => {
+    const container = fakeContainer();
+    await provisionServer(container.executor, { ...input, settings: { a: 1 } }, new MemoryLogger());
+    container.scripts.length = 0;
+    await provisionServer(container.executor, { ...input, settings: { a: 1 } }, new MemoryLogger());
+    expect(container.scripts).toHaveLength(3); // platform, read, install (no write)
+  });
+
+  it('keeps going and warns when the container settings file is not valid JSON', async () => {
+    const container = fakeContainer('{ "broken": ');
+    const logger = new MemoryLogger();
+    const result = await provisionServer(
+      container.executor,
+      { ...input, settings: { a: 1 } },
+      logger,
+    );
+    expect(result.port).toBe(41000);
+    expect(
+      logger.entries.some(
+        (entry) => entry.level === 'warn' && /left unchanged/.test(entry.message),
+      ),
+    ).toBe(true);
+    expect(container.settings()).toBe('{ "broken": '); // untouched
+  });
+
+  it('rejects an extension id that is not a plain id', async () => {
+    const container = fakeContainer();
+    await expect(
+      provisionServer(
+        container.executor,
+        { ...input, extensions: ['x; reboot'] },
+        new MemoryLogger(),
+      ),
+    ).rejects.toMatchObject({ code: 'SERVER_UNSUPPORTED' });
+  });
+});

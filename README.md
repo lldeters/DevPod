@@ -25,12 +25,19 @@ Containers" extension. It builds on the public specification and the open-source
   **Reopen Folder Locally**, **Open Container Configuration File**, **Show Log**.
 - Image, Dockerfile and Docker Compose based configurations, Features, lifecycle commands and
   user handling come from the bundled Dev Container CLI, so they follow the specification.
+- **Extensions and settings** from `customizations.vscode` and `customizations.kiro` (the latter
+  overrides the former) are installed and applied in the container, including what Features
+  contribute. `portsAttributes` and `otherPortsAttributes` are applied as `remote.portsAttributes`
+  and `remote.otherPortsAttributes`.
+- **Port forwarding:** `forwardPorts` (numbers, or `"service:port"` for Compose) are forwarded on
+  start, and ports the IDE detects or you forward in the Ports view are tunneled to `localhost`.
+  Tunnels listen on the loopback interface only.
 - Docker and Podman.
 - No telemetry.
 
 Planned: Templates and "Add Dev Container Configuration Files", Attach to Running Container,
-Clone Repository in Container Volume, credential forwarding, port-forwarding UI, remote Docker
-hosts and more. See [docs/PLAN.md](docs/PLAN.md).
+Clone Repository in Container Volume, credential forwarding, remote Docker hosts and more. See
+[docs/PLAN.md](docs/PLAN.md).
 
 ## Requirements
 

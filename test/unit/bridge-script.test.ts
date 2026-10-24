@@ -45,6 +45,33 @@ describe('BRIDGE_SCRIPT', () => {
     expect(code).toBe(1);
   });
 
+  it('connects to the host given as second argument', async () => {
+    const port = await listenEcho();
+    const child = spawn(process.execPath, ['-e', BRIDGE_SCRIPT, String(port), 'localhost'], {
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    const chunks: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+    const closed = new Promise<number | null>((resolve) => child.on('close', resolve));
+    child.stdin.write('ping');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    child.stdin.end();
+    expect(await closed).toBe(0);
+    expect(Buffer.concat(chunks).toString()).toBe('ping');
+  });
+
+  it.each([['0'], ['65536'], ['1.5'], ['abc']])('rejects the port %s', async (port) => {
+    const child = spawn(process.execPath, ['-e', BRIDGE_SCRIPT, port], { stdio: 'ignore' });
+    expect(await new Promise<number | null>((resolve) => child.on('close', resolve))).toBe(2);
+  });
+
+  it('rejects a host that is not a plain name or address', async () => {
+    const child = spawn(process.execPath, ['-e', BRIDGE_SCRIPT, '80', 'a b; rm -rf /'], {
+      stdio: 'ignore',
+    });
+    expect(await new Promise<number | null>((resolve) => child.on('close', resolve))).toBe(2);
+  });
+
   it('rejects a non-numeric port argument instead of interpolating it', async () => {
     const child = spawn(process.execPath, ['-e', BRIDGE_SCRIPT, '1; process.exit(0)'], {
       stdio: 'ignore',

@@ -7,6 +7,12 @@ import type { Logger } from '../logger';
 import type { RunResult } from '../process';
 import { detectPlatformScript, parsePlatform } from './platform';
 import type { ServerBuildInfo } from './productInfo';
+import {
+  buildReadSettingsScript,
+  buildWriteSettingsScript,
+  machineSettingsPath,
+  mergeSettingsText,
+} from './machineSettings';
 import { buildInstallScript, parseInstallResult } from './script';
 import type { InstallResult } from './script';
 import { expandUrlTemplate } from './template';
@@ -23,6 +29,10 @@ export interface ProvisionInput {
   build: ServerBuildInfo;
   /** User-configured template; takes precedence over the one declared by the IDE. */
   urlTemplate?: string | undefined;
+  /** Extensions to install in the container (valid `publisher.name` ids). */
+  extensions?: readonly string[] | undefined;
+  /** Settings for the container's machine settings; merged into what is already there. */
+  settings?: Readonly<Record<string, unknown>> | undefined;
 }
 
 export const MISSING_TEMPLATE_MESSAGE =
@@ -51,14 +61,56 @@ async function runShell(
       return result.stdout;
     }
     const detail = (result.stderr || result.stdout).trim().split('\n').slice(-5).join('\n');
+    const action = { install: 'set up the server', settings: 'write settings' }[what];
     throw new DevContainerError(
       'SERVER_INSTALL_FAILED',
-      `Could not ${what === 'install' ? 'set up the server' : 'inspect the container'} (exit code ${
-        result.code ?? 'unknown'
-      }).${detail ? `\n${detail}` : ''}`,
+      `Could not ${action ?? 'inspect the container'} (exit code ${result.code ?? 'unknown'}).${
+        detail ? `\n${detail}` : ''
+      }`,
     );
   }
   return result.stdout;
+}
+
+/**
+ * Merges `settings` into the container's machine settings. Settings are a convenience, so a
+ * problem here is logged and does not stop the connection (unless the operation was cancelled).
+ */
+async function syncMachineSettings(
+  executor: ServerExecutor,
+  input: ProvisionInput,
+  home: string,
+  settings: Readonly<Record<string, unknown>>,
+  logger: Logger,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  try {
+    const file = machineSettingsPath(home, input.build.serverDataFolderName);
+    const current = await runShell(
+      executor,
+      input,
+      buildReadSettingsScript(file),
+      'inspect',
+      signal,
+    );
+    const merged = mergeSettingsText(current, { ...settings });
+    if (merged === current) {
+      return;
+    }
+    await runShell(executor, input, buildWriteSettingsScript(file, merged), 'settings', signal);
+    logger.log(
+      'info',
+      `Applied ${Object.keys(settings).length} setting(s) from the dev container configuration`,
+    );
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    logger.log(
+      'warn',
+      `Could not apply the dev container settings: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**
@@ -81,6 +133,10 @@ export async function provisionServer(
   );
   logger.log('info', `Container platform: ${platform.os}-${platform.arch}, home ${platform.home}`);
 
+  if (input.settings && Object.keys(input.settings).length > 0) {
+    await syncMachineSettings(executor, input, platform.home, input.settings, logger, signal);
+  }
+
   const downloadUrl = expandUrlTemplate(template, {
     commit: input.build.commit,
     quality: input.build.quality,
@@ -99,6 +155,7 @@ export async function provisionServer(
       commit: input.build.commit,
       applicationName: input.build.serverApplicationName,
       downloadUrl,
+      ...(input.extensions && input.extensions.length > 0 ? { extensions: input.extensions } : {}),
     }),
     'install',
     signal,

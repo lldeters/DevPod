@@ -27,13 +27,49 @@ declare module 'vscode' {
     readonly resolveAttempt: number;
   }
 
-  export type ResolverResult = ManagedResolvedAuthority;
+  export interface TunnelOptions {
+    remoteAddress: { port: number; host: string };
+    /** The local port the IDE would like; the factory may choose another one. */
+    localAddressPort?: number;
+    label?: string;
+    privacy?: string;
+    protocol?: string;
+  }
+
+  export interface TunnelDescription {
+    remoteAddress: { port: number; host: string };
+    localAddress: { port: number; host: string } | string;
+    privacy?: string;
+    protocol?: string;
+  }
+
+  export interface Tunnel extends TunnelDescription {
+    readonly onDidDispose: Event<void>;
+    dispose(): void | Thenable<void>;
+  }
+
+  export interface TunnelCreationOptions {
+    elevation: boolean;
+  }
+
+  export interface TunnelInformation {
+    /** Tunnels the environment already provides; they appear as forwarded in the Ports view. */
+    environmentTunnels?: TunnelDescription[];
+    tunnelFeatures?: { elevation: boolean; privacyOptions: unknown[]; protocol?: boolean };
+  }
+
+  export type ResolverResult = ManagedResolvedAuthority & TunnelInformation;
 
   export interface RemoteAuthorityResolver {
     resolve(
       authority: string,
       context: RemoteAuthorityResolverContext,
     ): ResolverResult | Thenable<ResolverResult>;
+    /** Called for every port the IDE forwards (manually or automatically). */
+    tunnelFactory?(
+      tunnelOptions: TunnelOptions,
+      tunnelCreationOptions: TunnelCreationOptions,
+    ): Thenable<Tunnel> | undefined;
   }
 
   export class RemoteAuthorityResolverError extends Error {

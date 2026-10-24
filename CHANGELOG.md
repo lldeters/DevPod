@@ -13,3 +13,9 @@ First experimental version.
 - Verified in Kiro 1.4.26 on Windows with Docker 29.2.0 (see docs/TESTING.md); other hosts and
   configuration styles are covered by automated tests only.
 - CLI log output: terminal color codes are removed and each command is logged once.
+- Extensions and settings from `customizations.vscode` / `customizations.kiro` (merged
+  configuration, so Features are included) are installed and applied in the container;
+  `portsAttributes` / `otherPortsAttributes` become `remote.portsAttributes` /
+  `remote.otherPortsAttributes`.
+- Port forwarding: `forwardPorts` are forwarded on start and the IDE's own forwards (Ports view,
+  automatic detection) are tunneled to localhost; supports `"service:port"` for Compose.

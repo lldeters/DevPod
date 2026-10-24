@@ -61,6 +61,16 @@ Use any project with `.devcontainer/devcontainer.json`, e.g. an `image` based on
 - [ ] Missing `serverDownloadUrlTemplate`: message tells what to set.
 - [ ] Wrong template (404): message contains the URL.
 
+### 6. Extensions, settings and ports
+
+Use `docs/ANLEITUNG-KIRO-TEST.md`, step 10, which has a ready-made project.
+
+- [ ] Extensions from `customizations.vscode.extensions` appear installed in the container window.
+- [ ] `customizations.vscode.settings` are active (Settings, _Remote_ tab, or the status bar).
+- [ ] A port from `forwardPorts` is listed in the Ports view and reachable on `localhost`.
+- [ ] A server started later in the container terminal is detected and forwarded automatically.
+- [ ] `portsAttributes` labels show in the Ports view.
+
 ## Verified results
 
 | Date       | Kiro (VS Code base) | Host                       | Engine         | Result                                                                                                                                                                                  |

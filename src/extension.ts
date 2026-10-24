@@ -43,19 +43,18 @@ export function activate(context: vscode.ExtensionContext): void {
   const remoteSupport = new RemoteSupport();
 
   // The resolver API is a proposed API: registering fails unless the IDE was told to allow it.
+  const resolver = new DevContainerResolver({
+    logger,
+    cli,
+    engine,
+    rebuilds,
+    serverBuild: readServerBuildInfo,
+    serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
+  });
+  context.subscriptions.push(resolver);
   try {
     context.subscriptions.push(
-      vscode.workspace.registerRemoteAuthorityResolver(
-        AUTHORITY_PREFIX,
-        new DevContainerResolver({
-          logger,
-          cli,
-          engine,
-          rebuilds,
-          serverBuild: readServerBuildInfo,
-          serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
-        }),
-      ),
+      vscode.workspace.registerRemoteAuthorityResolver(AUTHORITY_PREFIX, resolver),
     );
     remoteSupport.enabled = true;
   } catch (error) {

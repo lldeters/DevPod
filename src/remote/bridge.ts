@@ -2,11 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from 'node:child_process';
+import type { ChildProcessByStdio } from 'node:child_process';
+import type { Readable, Writable } from 'node:stream';
 import * as vscode from 'vscode';
 import { execArgs } from '../core/engine/containerEngine';
 import type { Logger } from '../core/logger';
 import { BRIDGE_SCRIPT } from '../core/server/script';
 import type { InstallResult } from '../core/server/script';
+
+/** How to run a process inside the container. */
+export interface ContainerTarget {
+  enginePath: string;
+  containerId: string;
+  user: string;
+  /** The Node binary to run the bridge with: the server's bundled one, or `node` from PATH. */
+  nodePath: string;
+}
 
 export interface BridgeTarget {
   enginePath: string;
@@ -16,20 +27,39 @@ export interface BridgeTarget {
 }
 
 /**
- * Connects the IDE to the server inside the container without publishing any port: a
- * `docker exec -i` process runs the container's own Node binary, which relays stdio to the
- * server's loopback port. Each call creates one independent connection.
+ * Starts `docker exec -i … node -e <bridge> <port> [host]`, which relays this process's stdio to a
+ * TCP port inside the container. No port is published on the host and no shell is involved.
  */
-export function createBridge(target: BridgeTarget, logger: Logger): vscode.ManagedMessagePassing {
-  const child = spawn(
+export function spawnBridge(
+  target: ContainerTarget,
+  port: number,
+  host?: string,
+): ChildProcessByStdio<Writable, Readable, Readable> {
+  return spawn(
     target.enginePath,
     execArgs({
       containerId: target.containerId,
       user: target.user,
       interactive: true,
-      command: [target.server.node, '-e', BRIDGE_SCRIPT, String(target.server.port)],
+      command: [target.nodePath, '-e', BRIDGE_SCRIPT, String(port), ...(host ? [host] : [])],
     }),
     { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+  );
+}
+
+/**
+ * Connects the IDE to the server inside the container. Each call creates one independent
+ * connection.
+ */
+export function createBridge(target: BridgeTarget, logger: Logger): vscode.ManagedMessagePassing {
+  const child = spawnBridge(
+    {
+      enginePath: target.enginePath,
+      containerId: target.containerId,
+      user: target.user,
+      nodePath: target.server.node,
+    },
+    target.server.port,
   );
 
   const received = new vscode.EventEmitter<Uint8Array>();

@@ -37,6 +37,31 @@ src/ui/       Commands, status bar item, reopen prompt, setup of argv.json, logg
 5. **Rebuild** persists a request in `globalState`, reloads the window, and the resolver consumes
    it once (`--remove-existing-container`, optionally `--build-no-cache`).
 
+## Extensions, settings and ports
+
+`devcontainer up` is asked for `--include-merged-configuration`, so the result includes what
+Features contribute. From it the resolver reads:
+
+- **Extensions and settings** (`src/core/config/customizations.ts`). `customizations.<tool>` is an
+  object in `devcontainer.json` but an array with one entry per source (config, each Feature) in the
+  merged configuration; both shapes are handled. `vscode` is read first and `kiro` last, so Kiro
+  specific entries win. Only plain `publisher.name` ids are accepted (no versions, no URLs), which
+  makes them safe as command-line arguments. Extensions are passed to the server as
+  `--install-extension <id>` **when it starts**; a server that is already running is reused as is,
+  so a changed extension list takes effect after _Rebuild Container_.
+- **Settings** are merged into `~/<serverDataFolderName>/data/Machine/settings.json` in the
+  container before the server starts (`src/core/server/machineSettings.ts`). Comments and other keys
+  are kept, a key from the configuration replaces the same key, and an unchanged file is not
+  rewritten. The text is written through a quoted here-document with a random delimiter. A problem
+  here is logged and does not stop the connection. `portsAttributes` and `otherPortsAttributes` use
+  the same shape as `remote.portsAttributes` / `remote.otherPortsAttributes` and travel the same way.
+- **Ports.** `resolver.tunnelFactory` is called by the IDE for every forward. It opens a local TCP
+  server on `127.0.0.1` (the requested local port if free) and relays each connection through its
+  own `docker exec -i … node -e <bridge> <port> [host]` (`src/core/tunnel.ts`). The optional host
+  lets `"db:5432"` reach another container of a Compose project. `forwardPorts` entries are opened
+  during resolution and returned as `environmentTunnels`, so the Ports view shows them as already
+  forwarded. They are replaced on every resolution and closed when the resolver is disposed.
+
 ## Decisions
 
 - **The Dev Container CLI is the engine.** Merge logic, Features, Compose, lifecycle ordering and

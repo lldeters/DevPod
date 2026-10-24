@@ -65,6 +65,8 @@ export interface UpSuccess {
   readonly remoteUser: string;
   readonly remoteWorkspaceFolder: string;
   readonly composeProjectName?: string;
+  /** Present when requested with `--include-merged-configuration`; includes Feature metadata. */
+  readonly mergedConfiguration?: Record<string, unknown>;
 }
 
 export interface WorkspaceInfo {
@@ -119,12 +121,16 @@ export function parseUpResult(stdout: string): UpSuccess {
     throw new DevContainerError('CLI_BAD_OUTPUT', 'The Dev Container CLI result has no outcome.');
   }
   const composeProjectName = result['composeProjectName'];
+  const merged = result['mergedConfiguration'];
   return {
     outcome: 'success',
     containerId: requireString(result, 'containerId'),
     remoteUser: requireString(result, 'remoteUser'),
     remoteWorkspaceFolder: requireString(result, 'remoteWorkspaceFolder'),
     ...(typeof composeProjectName === 'string' ? { composeProjectName } : {}),
+    ...(typeof merged === 'object' && merged !== null && !Array.isArray(merged)
+      ? { mergedConfiguration: merged as Record<string, unknown> }
+      : {}),
   };
 }
 

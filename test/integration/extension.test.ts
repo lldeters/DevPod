@@ -5,6 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import * as net from 'node:net';
 import * as path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as vscode from 'vscode';
@@ -380,5 +381,227 @@ describe('Show Diagnostics', () => {
     expect(report['containerEngine'].version.error).toMatch(/Could not run|not reachable/);
     expect(report['argvJson'].listsThisExtension).toBe(false);
     expect(state.errorMessages).toEqual([]);
+  });
+});
+
+describe('DevContainerResolver: customizations and port forwarding', () => {
+  const build = {
+    commit: 'abc123',
+    quality: 'stable',
+    version: '1.103.2',
+    serverApplicationName: 'kiro-server',
+    serverDataFolderName: '.kiro-server',
+    downloadUrlTemplate: 'https://dl.example/${commit}.tar.gz',
+  };
+  const ok = (stdout: string): RunResult => ({ code: 0, signal: null, stdout, stderr: '' });
+  const platform = ok(
+    `${PLATFORM_MARKER}: start\nkernel==Linux\nmachine==x86_64\nlibc==gnu\nhome==/home/vscode\n${PLATFORM_MARKER}: end\n`,
+  );
+  const installed = ok(
+    `${INSTALL_MARKER}: start\nserverDir==/home/vscode/.kiro-server/bin/abc123\nport==41000\ntoken==tok\nnode==/n\nlog==/l\n${INSTALL_MARKER}: end\n`,
+  );
+  const cleanups: (() => Promise<void> | void)[] = [];
+  let bridgeStub: string;
+
+  beforeAll(async () => {
+    // Stands in for `docker exec -i … <node> -e <bridge> <port> [host]`: runs the bridge locally.
+    bridgeStub = path.join(root, 'docker-bridge-stub');
+    await writeFile(
+      bridgeStub,
+      `#!${process.execPath}
+const { spawn } = require('child_process');
+const args = process.argv.slice(2);
+const child = spawn(process.execPath, args.slice(args.indexOf('-e')), { stdio: 'inherit' });
+child.on('exit', (code) => process.exit(code ?? 1));
+`,
+    );
+    await chmod(bridgeStub, 0o755);
+  });
+
+  afterEach(async () => {
+    while (cleanups.length > 0) await cleanups.pop()?.();
+  });
+
+  function startEcho(): Promise<number> {
+    return new Promise((resolve) => {
+      const server = net.createServer((socket) => socket.pipe(socket));
+      cleanups.push(() => new Promise<void>((done) => server.close(() => done())));
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
+    });
+  }
+
+  async function echoThrough(port: number, text: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1');
+      let received = '';
+      socket.on('data', (chunk) => {
+        received += chunk.toString();
+        if (received.length >= text.length) socket.end();
+      });
+      socket.on('close', () => resolve(received));
+      socket.on('error', reject);
+      socket.on('connect', () => socket.write(text));
+    });
+  }
+
+  function setup(mergedConfiguration: Record<string, unknown>) {
+    const scripts: string[] = [];
+    let settingsFile = '';
+    const logger = new MemoryLogger();
+    const cli = {
+      up: async () => ({
+        outcome: 'success',
+        containerId: 'c0ffee1234567890',
+        remoteUser: 'vscode',
+        remoteWorkspaceFolder: '/workspaces/app',
+        mergedConfiguration,
+      }),
+    } as unknown as DevContainerCli;
+    const engine = {
+      path: bridgeStub,
+      checkAvailable: async () => '27.0.0',
+      exec: async (options: { stdin?: string }) => {
+        const script = options.stdin ?? '';
+        scripts.push(script);
+        if (script.includes(`${PLATFORM_MARKER}: start`)) return platform;
+        if (script.includes(`${INSTALL_MARKER}: start`)) return installed;
+        if (script.startsWith('cat ')) return ok(settingsFile);
+        const heredoc = /<<'(DCK_[0-9a-f]+)'\n([\s\S]*?)\n\1\n/.exec(script);
+        if (heredoc) settingsFile = `${heredoc[2]}\n`;
+        return ok('');
+      },
+    } as unknown as ContainerEngine;
+    const resolver = new DevContainerResolver({
+      logger,
+      cli,
+      engine,
+      rebuilds: new RebuildRequests(new mock.MockMemento() as unknown as vscode.Memento),
+      serverBuild: async () => build,
+      serverUrlTemplate: () => undefined,
+    });
+    cleanups.push(() => resolver.dispose());
+    return { resolver, scripts, logger, settings: () => JSON.parse(settingsFile || '{}') };
+  }
+
+  const authority = () => encodeAuthority({ hostPath: sub });
+
+  it('installs the extensions and applies the settings from the merged configuration', async () => {
+    const { resolver, scripts, settings, logger } = setup({
+      // the CLI's merged configuration collects one entry per source (config and Features)
+      customizations: {
+        vscode: [
+          { extensions: ['esbenp.prettier-vscode'], settings: { 'editor.tabSize': 2 } },
+          { extensions: ['redhat.vscode-yaml', 'esbenp.prettier-vscode', 'bad id@1.0'] },
+        ],
+        kiro: [{ settings: { 'editor.tabSize': 4 } }],
+      },
+      portsAttributes: { '3000': { label: 'App' } },
+      otherPortsAttributes: { onAutoForward: 'silent' },
+    });
+
+    await resolver.resolve(authority());
+
+    const install = scripts.find((script) => script.includes(`${INSTALL_MARKER}: start`)) ?? '';
+    expect(install).toContain("'--install-extension' 'esbenp.prettier-vscode'");
+    expect(install).toContain("'--install-extension' 'redhat.vscode-yaml'");
+    expect(install.match(/--install-extension/g)).toHaveLength(2); // duplicates and bad ids dropped
+    expect(settings()).toEqual({
+      'editor.tabSize': 4, // customizations.kiro overrides customizations.vscode
+      'remote.portsAttributes': { '3000': { label: 'App' } },
+      'remote.otherPortsAttributes': { onAutoForward: 'silent' },
+    });
+    expect(logger.entries.some((e) => e.level === 'warn' && e.message.includes('bad id@1.0'))).toBe(
+      true,
+    );
+  });
+
+  it('leaves the container alone when the configuration asks for nothing', async () => {
+    const { resolver, scripts } = setup({});
+    await resolver.resolve(authority());
+    expect(scripts).toHaveLength(2); // platform + install; no settings, no extensions
+    expect(scripts[1]).not.toContain('--install-extension');
+  });
+
+  it('forwards the configured ports and reports them as already forwarded', async () => {
+    const remote = await startEcho();
+    const { resolver } = setup({ forwardPorts: [remote, 'bad host:1', 70000] });
+
+    const resolved = (await resolver.resolve(authority())) as unknown as {
+      environmentTunnels: {
+        remoteAddress: { host: string; port: number };
+        localAddress: { host: string; port: number };
+      }[];
+      tunnelFeatures: { elevation: boolean };
+    };
+
+    expect(resolved.environmentTunnels).toHaveLength(1);
+    const [tunnel] = resolved.environmentTunnels;
+    expect(tunnel?.remoteAddress).toEqual({ host: 'localhost', port: remote });
+    expect(tunnel?.localAddress.host).toBe('127.0.0.1');
+    expect(await echoThrough(tunnel?.localAddress.port ?? 0, 'through the tunnel')).toBe(
+      'through the tunnel',
+    );
+    expect(resolved.tunnelFeatures.elevation).toBe(false);
+  });
+
+  it('opens tunnels the IDE asks for, and closes them again on dispose', async () => {
+    const remote = await startEcho();
+    const { resolver } = setup({});
+    await resolver.resolve(authority());
+
+    const tunnel = await resolver.tunnelFactory({
+      remoteAddress: { host: 'localhost', port: remote },
+    });
+    const local = (tunnel.localAddress as { port: number }).port;
+    expect(await echoThrough(local, 'ping')).toBe('ping');
+
+    let disposed = false;
+    tunnel.onDidDispose(() => {
+      disposed = true;
+    });
+    await tunnel.dispose();
+    expect(disposed).toBe(true);
+    await expect(echoThrough(local, 'again')).rejects.toThrow();
+  });
+
+  it('refuses tunnels before a container is connected', async () => {
+    const { resolver } = setup({});
+    await expect(
+      resolver.tunnelFactory({ remoteAddress: { host: 'localhost', port: 3000 } }),
+    ).rejects.toThrow(/not connected/);
+  });
+
+  it('closes forwarded ports when the resolver is disposed', async () => {
+    const remote = await startEcho();
+    const { resolver } = setup({ forwardPorts: [remote] });
+    const resolved = (await resolver.resolve(authority())) as unknown as {
+      environmentTunnels: { localAddress: { port: number } }[];
+    };
+    const local = resolved.environmentTunnels[0]?.localAddress.port ?? 0;
+    expect(await echoThrough(local, 'x')).toBe('x');
+
+    resolver.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect(echoThrough(local, 'y')).rejects.toThrow();
+  });
+
+  it('replaces the forwarded ports when it resolves again (window reconnect)', async () => {
+    const remote = await startEcho();
+    const { resolver } = setup({ forwardPorts: [remote] });
+
+    const first = (await resolver.resolve(authority())) as unknown as {
+      environmentTunnels: { localAddress: { port: number } }[];
+    };
+    const firstPort = first.environmentTunnels[0]?.localAddress.port ?? 0;
+    const second = (await resolver.resolve(authority())) as unknown as {
+      environmentTunnels: { localAddress: { port: number } }[];
+    };
+    const secondPort = second.environmentTunnels[0]?.localAddress.port ?? 0;
+
+    expect(secondPort).toBeGreaterThan(0);
+    expect(await echoThrough(secondPort, 'ok')).toBe('ok');
+    if (firstPort !== secondPort) {
+      await expect(echoThrough(firstPort, 'old')).rejects.toThrow(); // no leaked listener
+    }
   });
 });

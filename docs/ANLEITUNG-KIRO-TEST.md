@@ -217,6 +217,86 @@ Bitte schicke mir **in dieser Reihenfolge**:
 
 ---
 
+## Schritt 10: Neue Funktionen testen – Extensions, Einstellungen und Ports
+
+Dieser Schritt gilt für den **neueren Build** der Extension. Er kann Extensions und Einstellungen
+aus der `devcontainer.json` im Container anwenden und Ports an deinen Rechner weiterleiten.
+
+### 10a: Neue Version installieren
+
+1. Hole dir auf <https://github.com/lldeters/DevPod/actions> aus dem **neuesten grünen Lauf** das
+   Artefakt `devcontainers-kiro-vsix` (wie in Schritt 2) und entpacke es.
+2. Befehlspalette → **„Extensions: Install from VSIX…“** → die neue Datei wählen. Die alte Version
+   wird ersetzt. Danach **Kiro neu laden** (Befehlspalette → „Developer: Reload Window“).
+   Die Freischaltung aus Schritt 4 bleibt bestehen.
+
+### 10b: Neues Testprojekt
+
+Lege einen **zweiten** Ordner an, damit nichts vom ersten Test hineinspielt.
+
+**macOS / Linux:**
+
+```sh
+mkdir -p ~/kiro-devcontainer-test2/.devcontainer
+cat > ~/kiro-devcontainer-test2/.devcontainer/devcontainer.json <<'EOF'
+{
+  "name": "Kiro Test 2",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "forwardPorts": [3000],
+  "portsAttributes": { "3000": { "label": "Test-App", "onAutoForward": "notify" } },
+  "customizations": {
+    "vscode": {
+      "extensions": ["esbenp.prettier-vscode"],
+      "settings": { "editor.tabSize": 3 }
+    }
+  }
+}
+EOF
+```
+
+**Windows (PowerShell):**
+
+```powershell
+mkdir $HOME\kiro-devcontainer-test2\.devcontainer
+Set-Content $HOME\kiro-devcontainer-test2\.devcontainer\devcontainer.json '{ "name": "Kiro Test 2", "image": "mcr.microsoft.com/devcontainers/javascript-node:22", "forwardPorts": [3000], "portsAttributes": { "3000": { "label": "Test-App", "onAutoForward": "notify" } }, "customizations": { "vscode": { "extensions": ["esbenp.prettier-vscode"], "settings": { "editor.tabSize": 3 } } } }'
+```
+
+Öffne den Ordner `kiro-devcontainer-test2` in Kiro, **vertraue ihm** (Schritt 6) und wähle
+**„Reopen in Container“**. Der erste Start lädt ein neues Image (einige Minuten).
+
+### 10c: Prüfen
+
+- [ ] **Extension:** Öffne die Extensions-Ansicht (Strg/Cmd+Umschalt+X). Im Container-Fenster
+      steht im Abschnitt für den Container (**„Dev Container“**) die Erweiterung
+      **„Prettier – Code formatter“**, evtl. erst nach etwa einer halben Minute.
+- [ ] **Einstellung:** Öffne eine neue leere Datei (Strg/Cmd+N). Unten rechts in der Statusleiste
+      sollte **„Spaces: 3“** stehen. Alternativ: Einstellungen (Strg/Cmd+,) → Tab **„Remote
+      [Dev Container …]“** → `editor.tabSize` ist **3**.
+- [ ] **Port aus `forwardPorts`:** Öffne das Panel **Ports** (Befehlspalette → „Ports: Focus on
+      Ports View“). Dort steht Port **3000** mit dem Namen **„Test-App“** und der Adresse
+      `localhost:3000`.
+- [ ] **Der Port funktioniert:** Starte im Terminal des Container-Fensters:
+      `node -e "require('http').createServer((q,r)=>r.end('Hallo aus dem Container')).listen(3000)"`
+      Öffne dann **im Browser auf deinem Rechner** <http://localhost:3000>. Es sollte
+      **„Hallo aus dem Container“** erscheinen. Beende den Server mit Strg+C.
+- [ ] **Automatische Erkennung:** Starte einen Server auf einem Port, der **nicht** in der
+      Konfiguration steht:
+      `node -e "require('http').createServer((q,r)=>r.end('Port 4000')).listen(4000)"`
+      Im Ports-Panel sollte **4000** von selbst auftauchen (evtl. mit Hinweis). Dann
+      <http://localhost:4000> im Browser öffnen.
+
+Im Protokoll (Ansicht → Ausgabe → „Kiro Dev Containers“) sollten Zeilen stehen wie
+`Extensions for the container: esbenp.prettier-vscode` und
+`Forwarding localhost:3000 in the container to localhost:3000`.
+
+### 10d: Was ich von dir brauche
+
+Hake die Punkte aus 10c ab und schreib mir bei jedem, der nicht klappt, **was du siehst**. Das
+Protokoll ist hier besonders hilfreich. Wenn die Extension nicht erscheint, ist das wichtig zu
+wissen: Dann prüfe ich, ob Kiros Server den Startparameter akzeptiert.
+
+---
+
 ## Entscheidung: Name und Publisher (kann warten)
 
 Für den Test musst du **nichts** entscheiden. Später, wenn die Extension auf Open VSX

@@ -75,6 +75,17 @@ describe('parseUpResult', () => {
     expect(parseUpResult(JSON.stringify(ok))).toEqual(ok);
   });
 
+  it('includes the merged configuration when present', () => {
+    const merged = { customizations: { vscode: [{ extensions: ['a.b'] }] } };
+    expect(
+      parseUpResult(JSON.stringify({ ...ok, mergedConfiguration: merged })).mergedConfiguration,
+    ).toEqual(merged);
+    expect(parseUpResult(JSON.stringify(ok)).mergedConfiguration).toBeUndefined();
+    expect(
+      parseUpResult(JSON.stringify({ ...ok, mergedConfiguration: [1] })).mergedConfiguration,
+    ).toBeUndefined();
+  });
+
   it('finds the document after other output lines', () => {
     expect(parseUpResult(`some noise\n${JSON.stringify(ok)}\n`).containerId).toBe('abc123');
   });

@@ -66,6 +66,22 @@ describe('buildInstallScript validation', () => {
     expect(script).toContain("DOWNLOAD_URL='https://e.com/a'\\''; reboot; '\\'''");
   });
 
+  it('passes each extension as its own --install-extension argument', () => {
+    const script = buildInstallScript({
+      ...base,
+      extensions: ['esbenp.prettier-vscode', 'redhat.vscode-yaml'],
+    });
+    expect(script).toContain("'--install-extension' 'esbenp.prettier-vscode'");
+    expect(script).toContain("'--install-extension' 'redhat.vscode-yaml'");
+  });
+
+  it.each(['ms-python.python@2024.1.0', 'not an id', 'x; reboot', '$(id).y', 'noPublisher', ''])(
+    'rejects the extension entry %j instead of passing it to the server',
+    (id) => {
+      expect(() => buildInstallScript({ ...base, extensions: [id] })).toThrow(DevContainerError);
+    },
+  );
+
   it('rejects an absurd strip depth', () => {
     expect(() => buildInstallScript({ ...base, stripComponents: 99 })).toThrow();
   });
@@ -124,7 +140,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
     await mkdir(path.join(top, 'bin'), { recursive: true });
     await writeFile(
       path.join(top, 'bin', 'fake-server'),
-      '#!/bin/sh\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
+      '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$(dirname "$0")/../args.txt"\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
     );
     await chmod(path.join(top, 'bin', 'fake-server'), 0o755);
     await symlink(process.execPath, path.join(top, 'node'));
@@ -168,6 +184,40 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
     await rm(archive); // a second download would now fail
     const second = parseInstallResult((await run(buildInstallScript(options()))).stdout);
     expect(second).toEqual(first);
+  });
+
+  it('starts the server with the requested extensions and without them by default', async () => {
+    const withExtensions = parseInstallResult(
+      (
+        await run(
+          buildInstallScript({
+            ...options(),
+            extensions: ['esbenp.prettier-vscode', 'redhat.vscode-yaml'],
+          }),
+        )
+      ).stdout,
+    );
+    const argsFile = path.join(withExtensions.serverDir, 'args.txt');
+    const args = (await readFile(argsFile, 'utf8')).trim().split('\n');
+    expect(args).toEqual(
+      expect.arrayContaining(['--start-server', '--host=127.0.0.1', '--port=0']),
+    );
+    const flagIndexes = args.flatMap((arg, index) =>
+      arg === '--install-extension' ? [index] : [],
+    );
+    expect(flagIndexes.map((index) => args[index + 1])).toEqual([
+      'esbenp.prettier-vscode',
+      'redhat.vscode-yaml',
+    ]);
+    // the token goes in a file, never on the command line
+    expect(args.some((arg) => arg.startsWith('--connection-token-file'))).toBe(true);
+    expect(args.join(' ')).not.toContain(withExtensions.token);
+  });
+
+  it('passes no --install-extension when none are requested', async () => {
+    const info = parseInstallResult((await run(buildInstallScript(options()))).stdout);
+    const args = (await readFile(path.join(info.serverDir, 'args.txt'), 'utf8')).trim().split('\n');
+    expect(args).not.toContain('--install-extension');
   });
 
   it('reports a failed download without leaving temporary files behind', async () => {

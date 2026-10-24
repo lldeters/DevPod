@@ -66,6 +66,13 @@ Features contribute. From it the resolver reads:
   lets `"db:5432"` reach another container of a Compose project. `forwardPorts` entries are opened
   during resolution and returned as `environmentTunnels`, so the Ports view shows them as already
   forwarded. They are replaced on every resolution and closed when the resolver is disposed.
+  Every request of the IDE and its outcome is logged at info level; the first refused connection
+  per tunnel too. The resolver brings its own factory on purpose: in VS Code 1.131.0 the IDE enables
+  the full Ports features, including automatic detection of new listening ports, only when the
+  resolver provides a `tunnelFactory` (`mainThreadTunnelService.ts`, `$setTunnelProvider`;
+  `remoteExplorer.ts`, `startCandidateListener`). The built-in factory for managed authorities does
+  not switch them on. Programs that must be reached from a local browser, such as the OAuth callback
+  of a sign-in, depend on this automatic detection, which scans every two seconds or slower.
 
 ## Kubernetes pods
 

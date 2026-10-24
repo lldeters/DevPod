@@ -71,6 +71,9 @@ Use `docs/ANLEITUNG-KIRO-TEST.md`, step 10, which has a ready-made project.
 - [ ] A port from `forwardPorts` is listed in the Ports view and reachable on `localhost`.
 - [ ] A server started later in the container terminal is detected and forwarded automatically.
 - [ ] `portsAttributes` labels show in the Ports view.
+- [ ] Signing in to Kiro in the container window works (`docs/ANLEITUNG-KIRO-TEST.md`, step 10e):
+      the callback port appears in the Ports view, or forwarding it by hand and reloading the
+      browser tab completes the sign-in.
 
 ### 7. Kubernetes pods
 

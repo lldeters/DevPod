@@ -43,12 +43,37 @@ export class TunnelHub implements vscode.Disposable {
 
   /** The `tunnelFactory` of the resolver. */
   async factory(options: vscode.TunnelOptions): Promise<vscode.Tunnel> {
+    const { host, port } = options.remoteAddress;
+    const remote = `${host}:${port}`;
+    const preferred = options.localAddressPort;
     const target = this.target;
     if (!target) {
+      this.logger.log(
+        'warn',
+        `The IDE asked to forward ${remote}, but the window is not connected.`,
+      );
       throw new Error('The remote window is not connected yet.');
     }
-    const tunnel = await this.open(target, options.remoteAddress, options.localAddressPort);
+    this.logger.log(
+      'info',
+      `The IDE asked to forward ${remote} (preferred local port: ${preferred ?? 'any'}).`,
+    );
+
+    let tunnel: OpenTunnel;
+    try {
+      tunnel = await this.open(target, options.remoteAddress, preferred);
+    } catch (error) {
+      this.logger.log('warn', `Could not forward ${remote}: ${errorMessage(error)}`);
+      throw error;
+    }
     this.tunnels.add(tunnel);
+    this.logger.log(
+      'info',
+      `Forwarding ${remote} to localhost:${tunnel.local.port}` +
+        (preferred !== undefined && preferred !== tunnel.local.port
+          ? ` (local port ${preferred} was not available)`
+          : ''),
+    );
 
     const disposed = new vscode.EventEmitter<void>();
     return {
@@ -58,6 +83,7 @@ export class TunnelHub implements vscode.Disposable {
       dispose: async () => {
         this.tunnels.delete(tunnel);
         await tunnel.close();
+        this.logger.log('info', `Stopped forwarding ${remote}.`);
         disposed.fire();
         disposed.dispose();
       },

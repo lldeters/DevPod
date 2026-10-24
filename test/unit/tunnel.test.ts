@@ -170,6 +170,30 @@ describe('openTunnel', () => {
     expect(result.length).toBe(0);
   });
 
+  it('reports the first refused connection at info level and later ones at debug level', async () => {
+    const dead = await new Promise<number>((resolve) => {
+      const server = net.createServer();
+      server.listen(0, '127.0.0.1', () => {
+        const { port } = server.address() as net.AddressInfo;
+        server.close(() => resolve(port));
+      });
+    });
+    const logger = new MemoryLogger();
+    const tunnel = await openTunnel(
+      localBridge(),
+      { host: 'localhost', port: dead },
+      undefined,
+      logger,
+    );
+    cleanups.push(() => tunnel.close());
+    await roundTrip(tunnel.local.port, Buffer.from('one'));
+    await roundTrip(tunnel.local.port, Buffer.from('two'));
+
+    const refused = logger.entries.filter((entry) => entry.message.includes('refused'));
+    expect(refused.map((entry) => entry.level)).toEqual(['info', 'debug']);
+    expect(refused[0]?.message).toContain(`localhost:${dead}`);
+  });
+
   it('close() stops the listener and ends open connections', async () => {
     const tunnel: OpenTunnel = await open(await startEcho());
     const socket = net.connect(tunnel.local.port, '127.0.0.1');

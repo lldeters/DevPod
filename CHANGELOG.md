@@ -22,3 +22,5 @@ First experimental version.
   forwarding. The IDE server falls back to `/tmp` when the home directory is not writable.
 - Port forwarding: `forwardPorts` are forwarded on start and the IDE's own forwards (Ports view,
   automatic detection) are tunneled to localhost; supports `"service:port"` for Compose.
+- Port forwards requested by the IDE, their failures and the first refused connection per tunnel
+  are written to the log, which makes a failing sign-in callback in a container window traceable.

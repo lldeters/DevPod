@@ -64,6 +64,7 @@ export async function openTunnel(
   const sockets = new Set<net.Socket>();
   const children = new Set<ChildProcessByStdio<Writable, Readable, Readable>>();
   const host = normalizeRemoteHost(remote.host);
+  let refusalReported = false;
 
   const server = net.createServer((socket) => {
     sockets.add(socket);
@@ -87,10 +88,12 @@ export async function openTunnel(
     child.on('error', finish);
     child.on('close', (code) => {
       if (code !== 0 && code !== null) {
+        // The first failure per tunnel is worth showing; a client that keeps retrying is not.
         logger.log(
-          'debug',
+          refusalReported ? 'debug' : 'info',
           `Port ${host}:${remote.port} refused the connection (exit ${code}). ${stderrTail.trim()}`,
         );
+        refusalReported = true;
       }
       finish();
     });

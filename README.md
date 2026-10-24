@@ -114,6 +114,16 @@ set `dev.containers.kubectlPath` / `dev.containers.kubeconfigPath`.
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.
 
+## Known issue: signing in to Kiro inside a container
+
+A new container has an empty home directory, so Kiro asks for a sign-in again. A sign-in through
+Google or GitHub receives the browser's answer on a local port **inside the container** (for
+example `http://localhost:12345/oauth/callback`), which therefore has to be forwarded to your
+machine. If the browser shows _Connection refused_, open the Ports view, check that the port from
+the browser's address bar is listed (or forward it with _Forward a Port_) and reload the tab. See
+`docs/ANLEITUNG-KIRO-TEST.md`, step 10e. This is under investigation; the cause is not yet
+confirmed.
+
 ## Security
 
 A dev container runs build steps and lifecycle scripts from the workspace. The extension is

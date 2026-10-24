@@ -582,7 +582,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
 
   it('opens tunnels the IDE asks for, and closes them again on dispose', async () => {
     const remote = await startEcho();
-    const { resolver } = setup({});
+    const { resolver, logger } = setup({});
     await resolver.resolve(authority());
 
     const tunnel = await resolver.tunnelFactory({
@@ -598,6 +598,14 @@ child.on('exit', (code) => process.exit(code ?? 1));
     await tunnel.dispose();
     expect(disposed).toBe(true);
     await expect(echoThrough(local, 'again')).rejects.toThrow();
+
+    // Each request of the IDE leaves a trace; this is what tells a failed login callback apart.
+    const info = logger.entries.filter((e) => e.level === 'info').map((e) => e.message);
+    expect(info).toContain(
+      `The IDE asked to forward localhost:${remote} (preferred local port: any).`,
+    );
+    expect(info).toContain(`Forwarding localhost:${remote} to localhost:${local}`);
+    expect(info).toContain(`Stopped forwarding localhost:${remote}.`);
   });
 
   it('refuses tunnels before a container is connected', async () => {

@@ -295,6 +295,52 @@ Hake die Punkte aus 10c ab und schreib mir bei jedem, der nicht klappt, **was du
 Protokoll ist hier besonders hilfreich. Wenn die Extension nicht erscheint, ist das wichtig zu
 wissen: Dann prüfe ich, ob Kiros Server den Startparameter akzeptiert.
 
+### 10e: Anmeldung in Kiro im Container-Fenster („Connection refused“)
+
+**Hintergrund:** Ein neuer Container hat ein leeres Home-Verzeichnis. Kiro legt die Anmeldung
+vermutlich als Datei dort ab (laut Drittquellen `~/.aws/sso/cache/kiro-auth-token.json`; von Kiro
+selbst nicht bestätigt). Dass du dich im **neuen** Container einmal erneut anmelden musst, ist
+deshalb wahrscheinlich normal. Bei der Anmeldung über Google oder GitHub läuft der Server, der die
+Rückmeldung des Browsers entgegennimmt (`http://localhost:<PORT>/oauth/callback`), **im Container**.
+Der Browser sitzt aber auf deinem Rechner. Die Anmeldung klappt nur, wenn genau dieser Port vom
+Container auf deinen Rechner weitergeleitet ist. „Connection refused“ heißt: In dem Moment lauscht
+auf deinem Rechner nichts an diesem Port.
+
+Die automatische Port-Erkennung von Kiro prüft nur alle paar Sekunden. Gut möglich, dass der
+Browser schneller war. So findest du es heraus, **ohne die Anmeldung neu zu starten**:
+
+1. Öffne das Ports-Panel: Befehlspalette → **„Ports: Focus on Ports View“**.
+2. Starte die Anmeldung und klicke den Google-Link. Wenn die Fehlerseite erscheint: **Tab offen
+   lassen** und aus der Adresszeile die Portnummer ablesen (`localhost:`**`12345`**`/oauth/callback…`).
+3. Schau ins Ports-Panel:
+   - **Der Port steht jetzt in der Liste:** Lade den Browser-Tab neu (F5). Wenn die Anmeldung
+     dann durchgeht, war es nur ein Zeitproblem.
+   - **Der Port fehlt:** Klicke im Ports-Panel auf **„Forward a Port“**, gib die Portnummer ein,
+     und lade danach den Tab neu.
+4. Schreib mir: Ist der Port von selbst erschienen (wie lange nach dem Klick)? Hat das Neuladen
+   geholfen? Und: War im **ersten** Container-Test (Schritt 7) auch eine Anmeldung nötig?
+
+**Alternative ohne Port:** Wähle auf dem Anmeldebildschirm statt Google/GitHub die Anmeldung mit
+**AWS Builder ID** oder **IAM Identity Center**. Laut Kiro-Team läuft sie auf entfernten Rechnern
+über einen Gerätecode (Adresse und Code im Browser eingeben, kein Rückweg nötig). Ob das auch in
+der IDE so ist, ist mir nicht bestätigt; probiere es gern aus.
+
+**Protokoll:** Die neue Version schreibt jede Weiterleitung, die Kiro anfordert, in **Ansicht →
+Ausgabe → „Kiro Dev Containers“**, zum Beispiel
+`The IDE asked to forward localhost:12345 (preferred local port: 12345).` und
+`Forwarding localhost:12345 to localhost:12345`. Das trennt die Fälle:
+
+| Im Protokoll nach dem Klick auf den Google-Link                   | Bedeutung                                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| keine Zeile zum Port                                              | Kiro hat den Port nie angefordert (Erkennung zu langsam oder Port wird nicht erkannt).            |
+| `The IDE asked to forward …` und `Forwarding …`, Browser lehnt ab | Die Weiterleitung steht, aber etwas dahinter stimmt nicht (zum Beispiel IPv4/IPv6). Log schicken. |
+| `Could not forward …`                                             | Die Weiterleitung selbst ist gescheitert. Die Meldung steht dahinter.                             |
+| `Port … refused the connection …`                                 | Die Weiterleitung steht, aber im Container lauscht nichts (mehr) an dem Port.                     |
+
+Für Fortgeschrittene: **„Developer: Set Log Level…“ → Trace**, Anmeldung wiederholen, dann in
+**Ausgabe → „Window“** nach `ForwardedPorts` filtern. Dort steht, welche Ports Kiro erkannt hat
+und warum es einen nicht weitergeleitet hat.
+
 ---
 
 ## Schritt 11: An einen Kubernetes-Pod anhängen („Attach to Kiro“)
@@ -377,6 +423,7 @@ ein **neues Fenster**. Die Installation des Servers im Pod dauert beim ersten Ma
 | Fehler mit `curl`/`wget`/`tar` oder `sh: not found` | Das Image enthält die nötigen Werkzeuge nicht (z. B. „distroless“ oder sehr schlanke Images). Nimm ein anderes Image zum Testen. |
 | „download failed“ mit Adresse                       | Der Pod erreicht Kiros Download-Server nicht (Firewall/Proxy im Cluster) oder es gibt dort keinen Build für das Betriebssystem.  |
 | Das Menü „Attach to Kiro“ fehlt                     | Die Kubernetes-Extension ist nicht installiert oder du klickst nicht auf einen Pod. Nimm Variante 2.                             |
+| Kiro verlangt im Pod-Fenster eine Anmeldung         | Gleiche Ursache und Vorgehen wie bei Container-Fenstern: siehe Schritt 10e.                                                      |
 
 Schick mir bei Problemen die genaue Meldung, den Inhalt von **Ansicht → Ausgabe → „Kiro Dev
 Containers“** und die Ausgabe von `kubectl get pod <name> -o wide`. Zum Aufräumen:

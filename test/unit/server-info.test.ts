@@ -74,9 +74,11 @@ describe('expandUrlTemplate', () => {
     );
   });
 
-  it('only allows http(s) and file URLs', () => {
+  it('only allows https and file URLs', () => {
     expect(() => expandUrlTemplate('ftp://h/x', vars)).toThrowError(/https/);
+    expect(() => expandUrlTemplate('http://h/${commit}', vars)).toThrowError(/https/);
     expect(() => expandUrlTemplate('${commit}', vars)).toThrowError(/https/);
+    expect(expandUrlTemplate('file:///tmp/${commit}.tar.gz', vars)).toBe('file:///tmp/c1.tar.gz');
   });
 });
 
@@ -102,7 +104,7 @@ describe('parsePlatform', () => {
     ).toThrowError(/riscv64/);
     expect(() =>
       parsePlatform(output(['kernel==Linux', 'machine==x86_64', 'home=='])),
-    ).toThrowError(/home/);
+    ).toThrowError(/home directory/);
   });
 
   it('ships a detection script that is plain POSIX sh', () => {

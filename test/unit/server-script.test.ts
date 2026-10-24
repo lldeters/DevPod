@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -50,6 +50,10 @@ describe('buildInstallScript validation', () => {
 
   it('accepts ordinary values', () => {
     expect(buildInstallScript(base)).toContain(`${INSTALL_MARKER}: start`);
+  });
+
+  it('downloads with curl over https only, also after redirects', () => {
+    expect(buildInstallScript(base)).toContain("--proto '=https,file' --proto-redir '=https'");
   });
 
   it.each([
@@ -141,7 +145,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
     await mkdir(path.join(top, 'bin'), { recursive: true });
     await writeFile(
       path.join(top, 'bin', 'fake-server'),
-      '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$(dirname "$0")/../args.txt"\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
+      '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$(dirname "$0")/../args.txt"\necho started >> "$(dirname "$0")/../starts.txt"\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
     );
     await chmod(path.join(top, 'bin', 'fake-server'), 0o755);
     await symlink(process.execPath, path.join(top, 'node'));
@@ -213,6 +217,50 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
     // the token goes in a file, never on the command line
     expect(args.some((arg) => arg.startsWith('--connection-token-file'))).toBe(true);
     expect(args.join(' ')).not.toContain(withExtensions.token);
+    // the server keeps its data next to itself, also when that is not below $HOME
+    expect(args[args.indexOf('--server-data-dir') + 1]).toBe(path.join(home, '.test-server'));
+  });
+
+  const starts = async (info: { serverDir: string }): Promise<number> =>
+    (await readFile(path.join(info.serverDir, 'starts.txt'), 'utf8')).trim().split('\n').length;
+
+  it('starts one server when two windows set it up at the same time', async () => {
+    const [first, second] = await Promise.all([
+      run(buildInstallScript(options())),
+      run(buildInstallScript(options())),
+    ]);
+    const a = parseInstallResult(first.stdout);
+    const b = parseInstallResult(second.stdout);
+    expect(b).toEqual(a);
+    expect(await starts(a)).toBe(1);
+    const token = await readFile(path.join(home, '.test-server', `server-${commit}.token`), 'utf8');
+    expect(a.token).toBe(token);
+  });
+
+  it('starts a new server when the recorded PID now belongs to another process', async () => {
+    const first = parseInstallResult((await run(buildInstallScript(options()))).stdout);
+    const pidFile = path.join(home, '.test-server', `server-${commit}.pid`);
+    process.kill(Number((await readFile(pidFile, 'utf8')).trim()), 'SIGKILL');
+    // After a restart of the container the old PID can be reused by an unrelated process.
+    const stranger = spawn('sleep', ['60'], { stdio: 'ignore' });
+    try {
+      await writeFile(pidFile, `${stranger.pid}\n`);
+      const second = parseInstallResult((await run(buildInstallScript(options()))).stdout);
+      expect(second.token).not.toBe(first.token);
+      expect(await starts(second)).toBe(2);
+    } finally {
+      stranger.kill('SIGKILL');
+    }
+  });
+
+  it('takes over a setup lock whose owner is gone', async () => {
+    const lock = path.join(home, '.test-server', 'setup.lock');
+    await mkdir(lock, { recursive: true });
+    const gone = spawnSync('sh', ['-c', 'echo $$']).stdout.toString().trim();
+    await writeFile(path.join(lock, 'owner'), `${gone} 1\n`);
+    const result = await run(buildInstallScript(options()));
+    expect(parseInstallResult(result.stdout).port).toBe(45678);
+    await expect(readFile(path.join(lock, 'owner'), 'utf8')).rejects.toThrow(); // released
   });
 
   it('passes no --install-extension when none are requested', async () => {
@@ -236,44 +284,58 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
     expect(leftovers).toBe('0');
   });
 
-  it('installs below /tmp when the home directory is unusable (common in pods)', async () => {
-    const folder = `.dck-fallback-${process.pid}`;
-    const fallbackCommit = 'cafe1234';
-    const script = buildInstallScript({
-      ...options(),
-      dataFolderName: folder,
-      commit: fallbackCommit,
-    });
-    try {
-      for (const unusableHome of [path.join(work, 'does-not-exist'), '']) {
-        const env = { ...process.env, HOME: unusableHome };
-        const result = await runProcess('sh', ['-s'], { stdin: script, env });
-        const info = parseInstallResult(result.stdout);
-        expect(info.serverDir).toBe(`/tmp/${folder}/bin/${fallbackCommit}`);
-        process.kill(
-          Number((await readFile(`/tmp/${folder}/server-${fallbackCommit}.pid`, 'utf8')).trim()),
-          'SIGKILL',
-        );
-        await rm(`/tmp/${folder}`, { recursive: true, force: true });
-      }
-    } finally {
-      await rm(`/tmp/${folder}`, { recursive: true, force: true });
+  const fallbackOf = (tmp: string): string =>
+    path.join(tmp, `devcontainers-kiro-${process.getuid?.() ?? 0}`);
+
+  it('installs in a private temporary folder when the home directory is unusable (common in pods)', async () => {
+    const tmp = path.join(work, 'tmp');
+    await mkdir(tmp);
+    const root = path.join(fallbackOf(tmp), '.test-server');
+    for (const unusableHome of [path.join(work, 'does-not-exist'), '']) {
+      const env = { ...process.env, HOME: unusableHome, TMPDIR: tmp };
+      const result = await runProcess('sh', ['-s'], { stdin: buildInstallScript(options()), env });
+      const info = parseInstallResult(result.stdout);
+      expect(info.serverDir).toBe(path.join(root, 'bin', commit));
+      const args = (await readFile(path.join(info.serverDir, 'args.txt'), 'utf8')).split('\n');
+      expect(args[args.indexOf('--server-data-dir') + 1]).toBe(root);
+      expect(execFileSync('stat', ['-c', '%a', fallbackOf(tmp)], { encoding: 'utf8' }).trim()).toBe(
+        '700',
+      );
+      process.kill(
+        Number((await readFile(path.join(root, `server-${commit}.pid`), 'utf8')).trim()),
+        'SIGKILL',
+      );
+      await rm(fallbackOf(tmp), { recursive: true, force: true });
     }
   });
 
-  it('detects /tmp as the base for a platform whose HOME is unset or missing', async () => {
-    for (const home of [undefined, path.join(work, 'does-not-exist')]) {
-      const env = { ...process.env };
-      if (home === undefined) delete env['HOME'];
-      else env['HOME'] = home;
+  it('detects the private temporary folder as the base when HOME is unset or missing', async () => {
+    const tmp = path.join(work, 'tmp');
+    await mkdir(tmp);
+    for (const unusable of [undefined, path.join(work, 'does-not-exist')]) {
+      const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: tmp };
+      if (unusable === undefined) delete env['HOME'];
+      else env['HOME'] = unusable;
       const result = await runProcess('sh', ['-s'], { stdin: detectPlatformScript, env });
-      expect(parsePlatform(result.stdout).home).toBe('/tmp');
+      expect(parsePlatform(result.stdout).home).toBe(fallbackOf(tmp));
     }
     const usable = await runProcess('sh', ['-s'], {
       stdin: detectPlatformScript,
       env: { ...process.env, HOME: home },
     });
     expect(parsePlatform(usable.stdout).home).toBe(home); // a usable home is still preferred
+  });
+
+  it('refuses a fallback folder that someone else may have prepared', async () => {
+    const tmp = path.join(work, 'tmp');
+    await mkdir(path.join(work, 'elsewhere'), { recursive: true });
+    await mkdir(tmp);
+    await symlink(path.join(work, 'elsewhere'), fallbackOf(tmp));
+    const env = { ...process.env, HOME: path.join(work, 'does-not-exist'), TMPDIR: tmp };
+    const detected = await runProcess('sh', ['-s'], { stdin: detectPlatformScript, env });
+    expect(() => parsePlatform(detected.stdout)).toThrowError(/fallback folder/);
+    const installed = await runProcess('sh', ['-s'], { stdin: buildInstallScript(options()), env });
+    expect(() => parseInstallResult(installed.stdout)).toThrowError(/no usable folder/);
   });
 
   it('reports a missing launcher', async () => {

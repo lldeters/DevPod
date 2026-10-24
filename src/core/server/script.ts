@@ -40,6 +40,28 @@ export interface InstallScriptParams {
   extensions?: readonly string[];
 }
 
+/**
+ * POSIX sh that sets `BASE` to the folder below which the server lives: the user's `$HOME` if it is
+ * a writable directory, else `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`). The fallback is
+ * private to the user and refused (BASE stays empty) unless it is a real directory the user owns,
+ * because anyone could have created that predictable name first. The platform check and the
+ * install script both use it, so they agree on the folder.
+ */
+export const CHOOSE_BASE_SCRIPT = `
+BASE="\${HOME:-}"
+if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ]; then
+  case "\${TMPDIR:-}" in /*) BASE="$TMPDIR" ;; *) BASE=/tmp ;; esac
+  USER_ID="$(id -u 2>/dev/null || true)"
+  BASE="\${BASE%/}/devcontainers-kiro-$USER_ID"
+  mkdir -p "$BASE" 2>/dev/null || true
+  if [ -z "$USER_ID" ] || [ -L "$BASE" ] || [ ! -d "$BASE" ] \\
+     || [ "$(stat -c %u "$BASE" 2>/dev/null || true)" != "$USER_ID" ] \\
+     || ! chmod 700 "$BASE" 2>/dev/null; then
+    BASE=""
+  fi
+fi
+`;
+
 // These flags follow the public VS Code remote extension host CLI and were confirmed against
 // Kiro 1.4.26's server (see docs/ARCHITECTURE.md). `--install-extension` is part of the same CLI.
 const REQUIRED_SERVER_ARGS = [
@@ -54,6 +76,10 @@ const REQUIRED_SERVER_ARGS = [
  * bound to 127.0.0.1 on a random port, and prints `key==value` lines describing the result.
  * Running it again reuses a running server. The script is meant to be piped to `sh -s`, so no
  * value ever appears on a process command line.
+ *
+ * Runs for the same folder are serialized with a lock directory, since two windows may connect at
+ * the same time. A running server is recognized by its PID and its start time, so a PID that was
+ * handed to another process after a restart is not mistaken for the server.
  */
 export function buildInstallScript(params: InstallScriptParams): string {
   assertSafeName(params.dataFolderName, 'server data folder name', true);
@@ -80,31 +106,66 @@ export function buildInstallScript(params: InstallScriptParams): string {
 set -eu
 umask 077
 echo "${INSTALL_MARKER}: start"
+TMP_DIR=""
+LOCK_DIR=""
+cleanup() {
+  if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi
+  if [ -n "$LOCK_DIR" ]; then rm -rf "$LOCK_DIR"; fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 fail() { echo "error==$1"; echo "${INSTALL_MARKER}: end"; exit 1; }
+# Start time of a process (field 22 of /proc/<pid>/stat), empty if unknown. The command name in
+# field 2 may contain spaces and parentheses, so the fields are counted after its last ")".
+proc_start() { sed -n 's/^.*) \\([^ ]* \\)\\{19\\}\\([0-9][0-9]*\\).*$/\\2/p' "/proc/$1/stat" 2>/dev/null || true; }
+# Whether process $1 runs and, if its start time $2 is known, is still the same process.
+is_running() {
+  [ -n "\${1:-}" ] || return 1
+  if [ -n "\${2:-}" ]; then [ "$(proc_start "$1")" = "$2" ]; else kill -0 "$1" 2>/dev/null; fi
+}
 
 DATA_FOLDER=${shQuote(params.dataFolderName)}
 COMMIT=${shQuote(params.commit)}
 APP_NAME=${shQuote(params.applicationName)}
 DOWNLOAD_URL=${shQuote(params.downloadUrl)}
-
-BASE="\${HOME:-}"
-if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ]; then BASE=/tmp; fi
+${CHOOSE_BASE_SCRIPT}
+[ -n "$BASE" ] || fail "no usable folder for the server: the home directory is not writable, and the fallback in the temporary directory is not a private folder of this user"
 ROOT="$BASE/$DATA_FOLDER"
 SERVER_DIR="$ROOT/bin/$COMMIT"
 LOG_FILE="$ROOT/server-$COMMIT.log"
 PID_FILE="$ROOT/server-$COMMIT.pid"
+START_FILE="$ROOT/server-$COMMIT.started"
 TOKEN_FILE="$ROOT/server-$COMMIT.token"
 PORT_FILE="$ROOT/server-$COMMIT.port"
 
 mkdir -p "$ROOT/bin" || fail "cannot create $ROOT"
 
+# One run at a time per folder: two windows may connect at once. The owner of the lock is recorded
+# so that a lock left behind by a killed run can be taken over.
+WAITED=0
+UNOWNED=0
+until mkdir "$ROOT/setup.lock" 2>/dev/null; do
+  HOLDER="$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)"
+  if [ -n "$HOLDER" ]; then UNOWNED=0; else UNOWNED=$((UNOWNED + 1)); fi
+  # shellcheck disable=SC2086 # the owner file holds "<pid> <start time>"
+  if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 5 ]; then
+    rm -rf "$ROOT/setup.lock"
+    continue
+  fi
+  [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.lock)"
+  WAITED=$((WAITED + 1))
+  sleep 1
+done
+LOCK_DIR="$ROOT/setup.lock"
+echo "$$ $(proc_start $$)" > "$LOCK_DIR/owner"
+
 if [ ! -f "$SERVER_DIR/.installed" ]; then
   TMP_DIR="$(mktemp -d "$ROOT/tmp.XXXXXX")" || fail "mktemp failed"
-  trap 'rm -rf "$TMP_DIR"' EXIT
   ARCHIVE="$TMP_DIR/server.tar.gz"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --retry 3 --connect-timeout 20 -o "$ARCHIVE" "$DOWNLOAD_URL" \\
-      || fail "download failed: $DOWNLOAD_URL"
+    # The archive becomes code in the container: https only (or a local file), also after redirects.
+    curl -fsSL --proto '=https,file' --proto-redir '=https' --retry 3 --connect-timeout 20 \\
+      -o "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_URL"
   elif command -v wget >/dev/null 2>&1; then
     wget -q -O "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_URL"
   else
@@ -120,23 +181,27 @@ fi
 
 [ -x "$SERVER_DIR/bin/$APP_NAME" ] || fail "server launcher bin/$APP_NAME not found or not executable"
 
-if [ -f "$PID_FILE" ] && [ -f "$PORT_FILE" ] && [ -f "$TOKEN_FILE" ] \\
-   && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+if [ -f "$PORT_FILE" ] && [ -f "$TOKEN_FILE" ] \\
+   && is_running "$(cat "$PID_FILE" 2>/dev/null || true)" "$(cat "$START_FILE" 2>/dev/null || true)"; then
   PORT="$(cat "$PORT_FILE")"
 else
-  rm -f "$PID_FILE" "$PORT_FILE" "$TOKEN_FILE" "$LOG_FILE"
+  rm -f "$PID_FILE" "$START_FILE" "$PORT_FILE" "$TOKEN_FILE" "$LOG_FILE"
   TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \\n')"
   printf '%s' "$TOKEN" > "$TOKEN_FILE"
   if command -v setsid >/dev/null 2>&1; then LAUNCH="setsid nohup"; else LAUNCH="nohup"; fi
-  $LAUNCH "$SERVER_DIR/bin/$APP_NAME" ${serverArgs} \\
+  # --server-data-dir keeps the server's data (extensions, settings, state) next to it, which
+  # matters when it lives in the fallback folder rather than in $HOME.
+  $LAUNCH "$SERVER_DIR/bin/$APP_NAME" ${serverArgs} --server-data-dir "$ROOT" \\
     --connection-token-file "$TOKEN_FILE" > "$LOG_FILE" 2>&1 < /dev/null &
-  echo $! > "$PID_FILE"
+  SERVER_PID=$!
+  echo "$SERVER_PID" > "$PID_FILE"
+  proc_start "$SERVER_PID" > "$START_FILE"
   PORT=""
   TRIES=0
   while [ "$TRIES" -lt 60 ]; do
     PORT="$(sed -n 's/.*listening on \\([0-9][0-9]*\\).*/\\1/p' "$LOG_FILE" 2>/dev/null | head -n 1)"
     [ -n "$PORT" ] && break
-    kill -0 "$(cat "$PID_FILE")" 2>/dev/null \\
+    kill -0 "$SERVER_PID" 2>/dev/null \\
       || fail "the server exited during startup: $(tail -n 5 "$LOG_FILE" | tr '\\n' ' ')"
     TRIES=$((TRIES + 1))
     sleep 1

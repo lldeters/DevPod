@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DevContainerError } from '../errors';
-import { parseKeyValueOutput } from './script';
+import { CHOOSE_BASE_SCRIPT, parseKeyValueOutput } from './script';
 
 export type ServerOs = 'linux' | 'alpine';
 export type ServerArch = 'x64' | 'arm64' | 'armhf';
@@ -17,15 +17,15 @@ export const PLATFORM_MARKER = 'devcontainers-kiro-platform';
 
 /**
  * POSIX sh script that reports kernel, machine, libc flavour and where the server may be installed:
- * the user's $HOME, or /tmp when that is unset or not writable (common in Kubernetes pods).
+ * the user's $HOME, or a private folder in the temporary directory when that is unset or not
+ * writable (common in Kubernetes pods); see CHOOSE_BASE_SCRIPT.
  */
 export const detectPlatformScript = `
 echo "${PLATFORM_MARKER}: start"
 echo "kernel==$(uname -s)"
 echo "machine==$(uname -m)"
 if [ -f /etc/alpine-release ]; then echo "libc==musl"; else echo "libc==gnu"; fi
-BASE="\${HOME:-}"
-if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ]; then BASE=/tmp; fi
+${CHOOSE_BASE_SCRIPT}
 echo "home==$BASE"
 echo "${PLATFORM_MARKER}: end"
 `;
@@ -60,7 +60,9 @@ export function parsePlatform(output: string): ContainerPlatform {
   if (!home || !home.startsWith('/')) {
     throw new DevContainerError(
       'SERVER_UNSUPPORTED',
-      'Could not determine the home directory of the container user.',
+      'The container user has no writable home directory, and the fallback folder ' +
+        '"devcontainers-kiro-<uid>" in the temporary directory is missing, not a directory or ' +
+        'not owned by that user.',
     );
   }
   return { os: values['libc'] === 'musl' ? 'alpine' : 'linux', arch, home };

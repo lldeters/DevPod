@@ -35,10 +35,11 @@ export function expandUrlTemplate(template: string, variables: TemplateVariables
     }
     return encodeURIComponent(value);
   });
-  if (!/^https?:\/\//i.test(url) && !/^file:\/\//i.test(url)) {
+  // The archive becomes code in the container, so plain http (open to tampering) is refused.
+  if (!/^https:\/\//i.test(url) && !/^file:\/\//i.test(url)) {
     throw new DevContainerError(
       'SERVER_UNSUPPORTED',
-      'The server download URL must start with https:// (or http://, file://).',
+      'The server download URL must start with https:// (or file:// for a file in the container).',
     );
   }
   return url;

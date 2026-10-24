@@ -1,0 +1,79 @@
+name: Release
+
+# Publishes the extension to Open VSX when a tag v<version> is pushed. It publishes the VSIX that the
+# full CI (including the Docker and Kubernetes end-to-end tests) built and tested for that commit.
+# Needs the repository secret OVSX_PAT; see docs/RELEASING.md.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Check tag, version and changelog
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - id: check
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match version $version in package.json."
+            exit 1
+          fi
+          if ! grep -Eq "^## $version \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md needs the heading '## $version (YYYY-MM-DD)' for this release."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish to Open VSX and create the GitHub release
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to create the GitHub release
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Fetch the VSIX that CI built and tested
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: devcontainers-kiro-vsix
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::error::The repository secret OVSX_PAT (an Open VSX access token) is not set."
+            exit 1
+          fi
+          npx ovsx publish --packagePath devcontainers-kiro.vsix
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The release notes are the changelog section of this version.
+          awk -v heading="## $VERSION " 'index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit } found' CHANGELOG.md > notes.md
+          cp devcontainers-kiro.vsix "devcontainers-kiro-$VERSION.vsix"
+          gh release create "$GITHUB_REF_NAME" "devcontainers-kiro-$VERSION.vsix" \
+            --title "$VERSION" --notes-file notes.md

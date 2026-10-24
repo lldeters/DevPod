@@ -4,6 +4,8 @@ on:
   push:
     branches: ['**']
   pull_request:
+  # The release workflow runs the whole CI, end-to-end tests included, before it publishes.
+  workflow_call:
 
 permissions:
   contents: read

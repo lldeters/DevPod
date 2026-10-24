@@ -37,6 +37,31 @@ describe('parseCliLogLine', () => {
   });
 });
 
+describe('parseCliLogLine cleanup', () => {
+  it('removes terminal color codes from text and raw lines', () => {
+    const esc = String.fromCharCode(27);
+    expect(
+      parseCliLogLine(
+        JSON.stringify({
+          type: 'text',
+          level: 2,
+          text: `${esc}[1m${esc}[31mhi${esc}[39m${esc}[22m`,
+        }),
+      ).text,
+    ).toBe('hi');
+    expect(parseCliLogLine(`${esc}[32mgreen${esc}[0m`).text).toBe('green');
+  });
+
+  it('logs the end of a command at trace level so each command appears once at debug', () => {
+    expect(parseCliLogLine('{"type":"start","level":2,"text":"Run: docker ps"}').level).toBe(
+      'debug',
+    );
+    expect(parseCliLogLine('{"type":"stop","level":2,"text":"Run: docker ps"}').level).toBe(
+      'trace',
+    );
+  });
+});
+
 describe('parseUpResult', () => {
   const ok = {
     outcome: 'success',

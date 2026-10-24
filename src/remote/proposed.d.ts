@@ -3,8 +3,8 @@
 
 // Minimal declarations for the `resolvers` proposed API, limited to what this extension uses.
 // Signatures follow vscode.proposed.resolvers.d.ts of the VS Code release the IDE is based on
-// (1.103). Proposed APIs can change in any release; compare against the IDE's base version when
-// updating `engines.vscode`.
+// (1.103); confirmed to work with Kiro 1.4.26, whose base is VS Code 1.131.0. Proposed APIs can
+// change in any release; compare against the IDE's base version when updating `engines.vscode`.
 import 'vscode';
 
 declare module 'vscode' {

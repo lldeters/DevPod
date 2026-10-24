@@ -10,4 +10,6 @@ First experimental version.
 - Remote authority resolver with an IDE server provisioned in the container and a stdio bridge.
 - One-time setup of `enable-proposed-api` in `argv.json`.
 - _Show Diagnostics_ command that copies IDE, server and engine facts (no credentials) to the clipboard.
-- Not yet verified inside Kiro; see docs/TESTING.md.
+- Verified in Kiro 1.4.26 on Windows with Docker 29.2.0 (see docs/TESTING.md); other hosts and
+  configuration styles are covered by automated tests only.
+- CLI log output: terminal color codes are removed and each command is logged once.

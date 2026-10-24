@@ -48,23 +48,29 @@ src/ui/       Commands, status bar item, reopen prompt, setup of argv.json, logg
 - **Authorities are untrusted input** (they can come from links): decoded strictly, paths are only
   passed as arguments, never through a shell.
 
-## Assumptions that are not verified yet
+## Assumptions and how they held up
 
-These cannot be checked without a Kiro installation and are the focus of the first manual test
-(see [TESTING.md](TESTING.md)):
+The design rested on five assumptions about Kiro that could only be checked in Kiro. They were
+checked on **2026-10-24 with Kiro 1.4.26 (VS Code base 1.131.0), Windows x64, Docker 29.2.0**:
 
-1. Kiro enables the `resolvers` proposed API for extensions listed in `enable-proposed-api`, and
-   its VS Code base still has the API shape declared in `src/remote/proposed.d.ts`.
-2. Kiro's `product.json` contains `commit`, `version`, `serverApplicationName` and
-   `serverDataFolderName`, and a server build for exactly that commit can be downloaded
-   (declared by `serverDownloadUrlTemplate` or supplied by the user).
-3. The server launcher accepts `--start-server --host --port --accept-server-license-terms
---connection-token-file` and prints `… listening on <port>` (the public VS Code server
-   behavior). If Kiro's differs, adjust `REQUIRED_SERVER_ARGS` / the port detection in
-   `src/core/server/script.ts`.
-4. The server archive has one top-level folder (`--strip-components=1`) with
-   `bin/<serverApplicationName>` and, ideally, a bundled `node`.
-5. Kiro's built-in agent extensions work in a remote extension host.
+1. **Proposed API.** Kiro honors `enable-proposed-api` in `argv.json`, and the `resolvers` API
+   has the shape declared in `src/remote/proposed.d.ts` (written against VS Code 1.103).
+   Confirmed: `remoteSupport.enabled` was `true` and a remote window opened.
+2. **Server metadata.** Kiro's `product.json` provides `commit`, `version`, `quality`,
+   `serverApplicationName` (`kiro-server`), `serverDataFolderName` (`.kiro-server`) **and** a
+   `serverDownloadUrlTemplate`
+   (`https://prod.download.desktop.kiro.dev/releases/remotes/${commit}/kiro-reh-${os}-${arch}.tar.gz`),
+   so no user setting is needed. Confirmed.
+3. **Server launcher.** `--start-server --host --port --accept-server-license-terms
+--connection-token-file` are accepted and the server prints `… listening on <port>`.
+   Confirmed (log: `IDE server listening on 127.0.0.1:42689`).
+4. **Archive layout.** One top-level folder (`--strip-components=1`) with
+   `bin/<serverApplicationName>`. Confirmed.
+5. **Agent extensions.** Kiro's built-in agent works in the remote extension host. Confirmed by the
+   tester (agent session in the container window).
+
+Still unverified in Kiro: macOS/Linux hosts, Podman, Compose/Dockerfile configurations and
+which `node` the bridge uses (the server's bundled one if present, else the container's).
 
 ## Security notes
 

@@ -4,11 +4,13 @@ Open-source [dev container](https://containers.dev) support for the [Kiro](https
 reopen a folder inside a container, with the IDE server, terminal, extensions and language
 tooling running in it.
 
-> **Status: experimental (0.1.0).**
-> The configuration and container handling is covered by automated tests, including the real
-> Dev Container CLI. **Connecting Kiro to a container has not yet been verified inside Kiro.**
-> It depends on a proposed API and on a Kiro server build that matches your IDE; see
-> [docs/TESTING.md](docs/TESTING.md) for what to check and how to report results.
+> **Status: experimental (0.1.0), first real-world test passed.**
+> Verified in Kiro 1.4.26 (VS Code 1.131) on Windows with Docker 29.2.0: _Reopen in Container_,
+> terminal and file editing in the container, installing extensions, a Kiro agent session,
+> _Rebuild Container_, _Reopen Folder Locally_ and reconnecting to a running container.
+> **Not yet verified:** macOS and Linux hosts, Podman, Docker Compose and Dockerfile based
+> configurations, sub folders of Git repositories and several configurations in one folder (these
+> are covered by automated tests only). See [docs/TESTING.md](docs/TESTING.md).
 
 This is an independent community project. It is **not affiliated with Microsoft or Amazon**, and
 it is a clean-room implementation: it contains no code from Microsoft's proprietary "Dev

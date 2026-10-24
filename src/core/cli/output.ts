@@ -28,6 +28,14 @@ function mapLevel(level: unknown): LogLevel {
   }
 }
 
+// The CLI forwards output of the tools it runs, including terminal color codes.
+// eslint-disable-next-line no-control-regex
+const ANSI_ESCAPE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+
+function clean(text: string): string {
+  return text.replace(ANSI_ESCAPE, '');
+}
+
 export function parseCliLogLine(line: string): CliLogEvent {
   try {
     const parsed: unknown = JSON.parse(line);
@@ -39,13 +47,16 @@ export function parseCliLogLine(line: string): CliLogEvent {
         (type === 'text' || type === 'start' || type === 'stop' || type === 'progress') &&
         typeof text === 'string'
       ) {
-        return { kind: type, level: mapLevel(record['level']), text };
+        // Every command is reported twice, when it starts and when it ends; only the start
+        // line is useful at debug level.
+        const level = type === 'stop' ? 'trace' : mapLevel(record['level']);
+        return { kind: type, level, text: clean(text) };
       }
     }
   } catch {
     // not JSON: fall through and report as raw text
   }
-  return { kind: 'raw', level: 'info', text: line };
+  return { kind: 'raw', level: 'info', text: clean(line) };
 }
 
 export interface UpSuccess {

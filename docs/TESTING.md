@@ -60,3 +60,9 @@ Use any project with `.devcontainer/devcontainer.json`, e.g. an `image` based on
 - [ ] Docker stopped: clear message.
 - [ ] Missing `serverDownloadUrlTemplate`: message tells what to set.
 - [ ] Wrong template (404): message contains the URL.
+
+## Verified results
+
+| Date       | Kiro (VS Code base) | Host                       | Engine         | Result                                                                                                                                                                                  |
+| ---------- | ------------------- | -------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-24 | 1.4.26 (1.131.0)    | Windows x64, Docker 29.2.0 | Docker Desktop | Image-based config: reopen, terminal, files, extension install, agent session, rebuild, reopen locally, reconnect to the running container. Server URL came from Kiro's `product.json`. |

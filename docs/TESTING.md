@@ -75,13 +75,16 @@ Use `docs/ANLEITUNG-KIRO-TEST.md`, step 10, which has a ready-made project.
 
 ### 6b. Sharing the Kiro sign-in
 
-`dev.containers.shareKiroLogin` is on by default; sign in to Kiro on this machine first.
+`dev.containers.shareKiroLogin` is `ask` by default; sign in to Kiro on this machine first.
 
-- [ ] A new container or pod window starts without asking to sign in; the log says _Copied the Kiro
-      sign-in of this machine into the container._
+- [ ] Connecting to a new container or pod shows the dialog _Copy your Kiro sign-in into ...?_,
+      which names it. **Cancel** copies nothing (log: _not copied ... (not confirmed)_), and the
+      dialog comes again on the next connection.
+- [ ] **Copy Sign-In** starts the window without asking to sign in; the log says _Copied the Kiro
+      sign-in of this machine into the container._ The next connection asks nothing.
 - [ ] Sign-in on this machine is still valid afterwards, also after Kiro in the container renewed its
       copy (this shows whether renewal signs out the other side).
-- [ ] With `dev.containers.shareKiroLogin` turned off, nothing is copied.
+- [ ] With `always` nothing is asked; with `never` nothing is copied.
 
 ### 7. Kubernetes pods
 
@@ -92,8 +95,16 @@ Use `docs/ANLEITUNG-KIRO-TEST.md`, step 11, which has a ready-made pod.
 - [ ] A new window opens, attached to the pod; the status bar says _Pod: <name>_.
 - [ ] The terminal runs in the pod; **File > Open Folder** lists the pod's files.
 - [ ] Installing an extension works; a port opened in the pod is forwarded to `localhost`.
-- [ ] A pod without a writable home directory still works (server in `/tmp`).
+- [ ] A pod without a writable home directory still works (server in
+      `/tmp/devcontainers-kiro-<uid>`), including installing an extension there.
 - [ ] A pod that is not running, or a missing `kubectl`, gives a clear message.
+
+### 8. Windows not opened by the extension
+
+- [ ] Opening a dev container or pod window through a link (`kiro://vscode-remote/<authority>/...`
+      with an authority copied from another machine's window) shows a dialog that names the folder
+      or pod; **Cancel** does nothing in the container or cluster.
+- [ ] A window opened with _Reopen in Container_ or _Attach to Kiro_ does not ask.
 
 ## Verified results
 

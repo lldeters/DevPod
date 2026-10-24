@@ -436,37 +436,44 @@ Containers“** und die Ausgabe von `kubectl get pod <name> -o wide`. Zum Aufrä
 
 Ohne diese Funktion fragt Kiro in jedem neuen Container oder Pod nach einer Anmeldung. Mit ihr
 kopiert die Extension beim Verbinden deine lokale Anmeldedatei
-(`~/.aws/sso/cache/kiro-auth-token.json`) ins Home-Verzeichnis des Containers oder Pods. Die
-Funktion ist **standardmäßig an**. Du musst auf deinem Rechner in Kiro angemeldet sein.
+(`~/.aws/sso/cache/kiro-auth-token.json`) ins Home-Verzeichnis des Containers oder Pods. Sie
+**fragt dich standardmäßig vorher**, und zwar bei jeder Verbindung, solange im Container noch keine
+Anmeldung liegt. Du musst auf deinem Rechner in Kiro angemeldet sein.
 
 ### 12a: Version installieren
 
 Installiere die neueste Version aus dem **neuesten grünen Lauf** (wie in 10a) und starte Kiro neu.
 Die Einstellung heißt `dev.containers.shareKiroLogin` („Dev › Containers: Share Kiro Login“). Sie
-steht standardmäßig auf „an“ und lässt sich nur in den **Benutzer**-Einstellungen ändern, nicht pro
-Projekt.
+steht standardmäßig auf `ask` (fragen); `always` kopiert ohne Frage, `never` nie. Sie lässt sich
+nur in den **Benutzer**-Einstellungen ändern, nicht pro Projekt.
 
 ### 12b: Prüfen
 
 - [ ] Öffne ein Projekt in einem **neuen** Container (zum Beispiel ein neues Testprojekt) oder hänge
-      dich an einen **neu gestarteten** Pod an. Kiro fragt **nicht** nach der Anmeldung.
-- [ ] Im Protokoll (Ansicht → Ausgabe → „Kiro Dev Containers“) steht
-      `Copied the Kiro sign-in of this machine into the container.` Beim zweiten Verbinden mit
-      demselben Container steht `The container already has a Kiro sign-in; it was left unchanged.`
+      dich an einen **neu gestarteten** Pod an. Es erscheint ein Dialog „Copy your Kiro sign-in
+      into …?“, der den Container oder Pod nennt.
+- [ ] Klicke **Abbrechen**: Es wird nichts kopiert, Kiro fragt nach der Anmeldung, und im Protokoll
+      steht `The Kiro sign-in was not copied into the container (not confirmed).` Lade das Fenster
+      neu (**Developer: Reload Window**): Der Dialog kommt wieder.
+- [ ] Klicke jetzt **Copy Sign-In**: Kiro fragt **nicht** nach der Anmeldung. Im Protokoll
+      (Ansicht → Ausgabe → „Kiro Dev Containers“) steht
+      `Copied the Kiro sign-in of this machine into the container.` Beim nächsten Verbinden kommt
+      kein Dialog mehr, und es steht
+      `The container already has a Kiro sign-in; it was left unchanged.`
 - [ ] **Wichtig:** Bleibst du auf deinem Rechner angemeldet? Prüfe das nach ein paar Stunden und
       nachdem du im Container mit Kiro gearbeitet hast. Kiro erneuert die Anmeldung regelmäßig. Wenn
       es dabei den Erneuerungs-Schlüssel austauscht, kann die eine Seite die andere abmelden. Das
       ist die Frage, die ich noch nicht beantworten kann.
-- [ ] Schalte die Einstellung aus und öffne einen weiteren neuen Container: Es wird nichts
-      kopiert, und Kiro fragt nach der Anmeldung.
+- [ ] Stelle die Einstellung auf `never` und öffne einen weiteren neuen Container: Es kommt kein
+      Dialog, es wird nichts kopiert, und Kiro fragt nach der Anmeldung.
 
 ### 12c: Wieder entfernen
 
 Im Terminal des Containers: `rm ~/.aws/sso/cache/kiro-auth-token.json`, oder in Kiro dort abmelden.
 
 **Bedenke:** Die kopierte Datei ist ein Zugangsdatum im Container oder Pod. Jeder, der dort Befehle
-ausführen darf, kann sie lesen (bei einer Anmeldung im Container ist das genauso). Schalte die
-Einstellung aus, wenn du Container oder Pods öffnest, auf die andere Zugriff haben.
+ausführen darf, kann sie lesen (bei einer Anmeldung im Container ist das genauso). Klicke im Dialog
+**Abbrechen**, wenn du Container oder Pods öffnest, auf die andere Zugriff haben.
 
 ---
 

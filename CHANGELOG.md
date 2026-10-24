@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+Security and bug fixes from a review:
+
+- **Unknown targets are confirmed.** A container or pod window that this extension did not open
+  itself (for example from a link) is resolved only after you confirm the folder or pod in a
+  dialog; before, a crafted link could run a folder's `initializeCommand` on this machine or
+  kubectl with a foreign kubeconfig. Paths on network shares are refused (WSL's shares are fine).
+  Windows that were already open ask once after the update.
+- **The Kiro sign-in is copied only after you agree.** `dev.containers.shareKiroLogin` is now
+  `"ask"` (default), `"always"` or `"never"`; the former `true` / `false` still mean always / never.
+  With `ask` you are asked on every connection while the container or pod has no sign-in.
+- Fix: forwarded ports and the connection lost the end of a stream (e.g. an HTTP response with
+  `Connection: close`) when the reader was slower than the server.
+- Fix: in the fallback folder for a home directory that is not writable, the IDE server kept its
+  data below `$HOME`, so extensions and settings did not work there (`--server-data-dir`).
+- The fallback folder is now `devcontainers-kiro-<uid>` in `$TMPDIR` or `/tmp`, private to the
+  user, instead of `/tmp` itself.
+- Fix: after a restart of the container or pod with a kept home directory, a PID taken over by
+  another process could make the extension hand out a dead server's port and token for good.
+- Fix: two windows connecting at the same time could delete each other's server files.
+- `remoteEnv` from `devcontainer.json` is applied (extension host and terminals).
+- The server is downloaded over `https` only (or `file://`); `http://` templates are refused.
+- Values of `-e`, `--env`, `--build-arg` and `--remote-env` are masked in the log.
+- A rebuild request expires after 15 minutes instead of removing the container at some later open.
+- `dev.containers.devcontainerCliPath` works with npm's `devcontainer.cmd` on Windows and with a
+  `.js` file.
+- `~` in kubectl and kubeconfig paths is read as the home directory.
+- Development: vitest 4 and esbuild 0.28; CI actions pinned to commits, kind download verified.
+
 ## 0.1.0 (unreleased)
 
 First experimental version.

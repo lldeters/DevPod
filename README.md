@@ -32,7 +32,8 @@ Containers" extension. It builds on the public specification and the open-source
 - **Extensions and settings** from `customizations.vscode` and `customizations.kiro` (the latter
   overrides the former) are installed and applied in the container, including what Features
   contribute. `portsAttributes` and `otherPortsAttributes` are applied as `remote.portsAttributes`
-  and `remote.otherPortsAttributes`.
+  and `remote.otherPortsAttributes`. `remoteEnv` applies to the extension host and to terminals
+  (`userEnvProbe` is not supported yet).
 - **Port forwarding:** `forwardPorts` (numbers, or `"service:port"` for Compose) are forwarded on
   start, and ports the IDE detects or you forward in the Ports view are tunneled to `localhost`.
   Tunnels listen on the loopback interface only.
@@ -73,7 +74,8 @@ This extension reads the build information (`commit`, `quality`, `version`,
 `serverApplicationName`, `serverDataFolderName`) from the IDE's `product.json` and downloads the
 server from `serverDownloadUrlTemplate` of `product.json`, or from the setting of the same name.
 Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${os}` (`linux` or `alpine`),
-`${arch}` (`x64`, `arm64`, `armhf`). Unknown placeholders are rejected.
+`${arch}` (`x64`, `arm64`, `armhf`). Unknown placeholders are rejected. The URL must use `https://`
+(or `file://` for an archive inside the container); with `curl`, redirects must stay on `https`.
 
 ## Usage
 
@@ -87,13 +89,13 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | ------------------------------------------ | -------- | ------------------------------------------------------------------------- |
 | `dev.containers.dockerPath`                | `docker` | Container engine CLI (`docker` or `podman`).                              |
 | `dev.containers.dockerComposePath`         | empty    | Compose CLI; empty lets the Dev Container CLI choose.                     |
-| `dev.containers.devcontainerCliPath`       | empty    | Use your own `devcontainer` instead of the bundled one                    |
+| `dev.containers.devcontainerCliPath`       | empty    | Your own `devcontainer` (executable, `.js`, or npm's `devcontainer.cmd`). |
 | `dev.containers.logLevel`                  | `info`   | `info`, `debug` or `trace`.                                               |
 | `dev.containers.promptToReopen`            | `true`   | Offer to reopen folders that have a configuration.                        |
 | `dev.containers.serverDownloadUrlTemplate` | empty    | Where to download the IDE server (see above).                             |
 | `dev.containers.kubectlPath`               | empty    | `kubectl` for pods; else the Kubernetes extension's, else `PATH`.         |
 | `dev.containers.kubeconfigPath`            | empty    | kubeconfig for pods; else the Kubernetes extension's, else kubectl's own. |
-| `dev.containers.shareKiroLogin`            | `true`   | Copy this machine's Kiro sign-in into containers and pods (see below).    |
+| `dev.containers.shareKiroLogin`            | `ask`    | Copy this machine's Kiro sign-in into containers and pods (see below).    |
 
 ## Kubernetes pods
 
@@ -109,8 +111,10 @@ in the original extension.
 - Use **File > Open Folder** in the new window to open a folder of the pod.
 
 What the pod needs: a running container with `sh`, `curl` or `wget`, and `tar`, on Linux x64 or
-arm64. The IDE server is installed in the user's home directory, or in `/tmp` if that is not
-writable. It is not part of the pod's image, so it is installed again after the pod is recreated.
+arm64. The IDE server is installed in the user's home directory, or, if that is not writable, in
+the private folder `devcontainers-kiro-<uid>` of `$TMPDIR` (or `/tmp`); that folder is refused unless
+it is a directory the user owns. It is not part of the pod's image, so it is installed again after
+the pod is recreated.
 Images without a shell (for example distroless images) cannot be used. `kubectl` must be installed
 and able to reach the cluster; the path and kubeconfig of the Kubernetes extension are honored, or
 set `dev.containers.kubectlPath` / `dev.containers.kubeconfigPath`.
@@ -128,18 +132,25 @@ whether the port was requested and forwarded; see `docs/ANLEITUNG-KIRO-TEST.md`,
 
 ### Skipping the sign-in: `dev.containers.shareKiroLogin`
 
-Kiro keeps its sign-in in `~/.aws/sso/cache/kiro-auth-token.json`. With
-`dev.containers.shareKiroLogin` (**on by default**, user settings only), the extension copies
-that file from your machine into the home directory of the container user, or of the pod's
-container user, when you connect. Kiro there then does not ask to sign in. Be aware of what this
-means:
+Kiro keeps its sign-in in `~/.aws/sso/cache/kiro-auth-token.json`. The extension can copy that
+file from your machine into the home directory of the container user, or of the pod's container
+user, when you connect. Kiro there then does not ask to sign in.
+`dev.containers.shareKiroLogin` (user settings only) decides when:
+
+- `ask` (default): when you connect to a container or pod that has no sign-in yet, a dialog names
+  it and asks whether to copy the sign-in. You are asked again on every connection until the
+  container has a sign-in.
+- `always`: copy without asking. `never`: never copy. (`true` and `false` from version 0.1.0 still
+  mean `always` and `never`.)
+
+Be aware of what a copy means:
 
 - The copy is a credential **inside the container or pod**. Everyone who can run commands there can
   read it, the same as after a sign-in made in the container.
 - An existing sign-in in the container is never replaced, and nothing is copied back.
 - The copy shares one session with this machine. If Kiro rotates the refresh token when it renews
   the sign-in (not confirmed), a renewal on one side can sign out the other.
-- Turn the setting off if you open containers or pods that other people can access.
+- Do not copy it into containers or pods that other people can access.
 - To remove a copy, run `rm ~/.aws/sso/cache/kiro-auth-token.json` in the container, or sign out in
   Kiro there.
 
@@ -149,7 +160,9 @@ tested automatically (including real containers and pods in CI) but not yet in K
 ## Security
 
 A dev container runs build steps and lifecycle scripts from the workspace. The extension is
-disabled in untrusted workspaces. See [SECURITY.md](SECURITY.md).
+disabled in untrusted workspaces. A container or pod window that this extension did not open
+itself (for example one opened through a link) is only resolved after you confirm the folder or
+pod in a dialog. See [SECURITY.md](SECURITY.md).
 
 ## Development
 

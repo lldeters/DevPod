@@ -29,18 +29,27 @@ src/ui/       Commands, status bar item, reopen prompt, setup of argv.json, logg
 1. **Reopen in Container**: discover configs → ask the user if several →
    `devcontainer read-configuration` to learn the workspace folder _inside_ the container (the CLI
    mounts the Git root, so for a sub folder this is `/workspaces/<repo>/<sub>`; we do not compute
-   it ourselves) → open `vscode-remote://dev-container+<hex>/<that path>`.
-2. The IDE calls the resolver with the authority. The resolver checks the engine, runs
-   `devcontainer up` (idempotent; reuses the container, honors a pending rebuild request), then
-   provisions the server.
+   it ourselves) → record the authority as known (`globalState`, `src/remote/knownTargets.ts`) →
+   open `vscode-remote://dev-container+<hex>/<that path>`.
+2. The IDE calls the resolver with the authority. An authority that is not known (for example from
+   a link) is confirmed by the user in a modal dialog that spells out the folder, before anything
+   reads it. The resolver then checks the engine, runs `devcontainer up` (idempotent; reuses the
+   container, honors a pending rebuild request), then provisions the server.
 3. **Provisioning** runs two POSIX `sh` scripts via `docker exec -i -u <remoteUser> … sh -s`
    (script on stdin, so nothing sensitive appears in a process list): platform detection, then
    download/unpack once per commit and start the server on `127.0.0.1:<random port>` with a
-   token file (mode 600). A running server is reused.
+   token file (mode 600) and `--server-data-dir` next to it. A running server is reused; it is
+   recognized by its PID **and** start time (`/proc/<pid>/stat`), so a PID that another process got
+   after a restart is not taken for it. Runs for the same folder are serialized with a lock
+   directory (`setup.lock`, owner recorded, taken over when the owner is gone), since two windows
+   may connect at once. The download must be `https` (or `file`); `curl` also refuses redirects to
+   anything but `https`.
 4. **Connection**: each connection spawns `docker exec -i … <container node> -e <bridge> <port>`
-   which relays stdio to the server's loopback port. No port is published on the host.
+   which relays stdio to the server's loopback port. No port is published on the host. The bridge
+   exits only once stdout has taken everything, so the end of a stream is not cut off.
 5. **Rebuild** persists a request in `globalState`, reloads the window, and the resolver consumes
-   it once (`--remove-existing-container`, optionally `--build-no-cache`).
+   it once (`--remove-existing-container`, optionally `--build-no-cache`). A request older than 15
+   minutes is dropped, so a failed attempt does not remove the container days later.
 
 ## Extensions, settings and ports
 
@@ -60,15 +69,23 @@ Features contribute. From it the resolver reads:
   rewritten. The text is written through a quoted here-document with a random delimiter. A problem
   here is logged and does not stop the connection. `portsAttributes` and `otherPortsAttributes` use
   the same shape as `remote.portsAttributes` / `remote.otherPortsAttributes` and travel the same way.
-- **Kiro sign-in** (`src/core/server/kiroLogin.ts`, setting `dev.containers.shareKiroLogin`, on by
-  default, scope `application` so a workspace cannot change it). The file `~/.aws/sso/cache/kiro-auth-token.json`
-  of this machine is read when the setting is on (a missing file is only logged at info level), checked to be a small JSON object, and written by
-  a `sh -s` script (content on stdin through a quoted here-document, so never in an argument list)
-  to `$HOME` of the exec user in the container or pod, right after the platform check. The script
-  uses the real `$HOME`, not the `/tmp` fallback the server may live in, and writes nothing without
-  a writable one; it creates 700/600 files like Kiro does, and never replaces a non-empty file. A
-  problem is logged and does not stop the connection. The content is never logged, and the error
-  text of this step contains no command output.
+- **remoteEnv** is returned to the IDE as `extensionHostEnv` of the resolver result, which the IDE
+  passes to the remote extension host and to terminals; it applies per connection, so a change
+  takes effect on the next reload. The CLI has already substituted `${containerEnv:...}` in the
+  merged configuration. Only the names are logged. `userEnvProbe` is not supported yet.
+- **Kiro sign-in** (`src/core/server/kiroLogin.ts`, `src/ui/kiroLogin.ts`, setting
+  `dev.containers.shareKiroLogin`: `ask` by default, `always` or `never`; scope `application` so a
+  workspace cannot change it). The file `~/.aws/sso/cache/kiro-auth-token.json` of this machine is
+  read unless the setting is `never` (a missing file is only logged at info level), checked to be a
+  small JSON object, and, right after the platform check, offered to the container. With `ask`, a
+  first script reports whether the exec user already has a sign-in; only if not, a modal dialog
+  naming the container or pod asks, on every connection. The copy is written by a `sh -s` script
+  (content on stdin through a quoted here-document, so never in an argument list) to `$HOME` of
+  the exec user in the container or pod. The script uses the real `$HOME`, not the fallback folder
+  the server may live in, and writes nothing without a writable one; it creates 700/600 files like
+  Kiro does, and never replaces a non-empty file. A problem is logged and does not stop the
+  connection. The content is never logged, and the error text of this step contains no command
+  output.
 - **Ports.** `resolver.tunnelFactory` is called by the IDE for every forward. It is an arrow
   function property: the IDE stores the function and calls it detached from the resolver
   (`this._forwardPortProvider(...)` in `extHostTunnelService.ts`), so a prototype method would find
@@ -112,13 +129,18 @@ exec -i --container=... pod -- ...` for a pod.
    configured, the kubeconfig path. Every field is validated against Kubernetes naming rules; none
    may start with a dash, and kubectl is always given `--flag=value` forms. The new window is opened
    with `vscode.newWindow({ remoteAuthority })`, without a folder.
-4. **Resolving.** `PodResolver` asks `kubectl get pod` (with the kubeconfig _of the connection_, not
+4. **Resolving.** An authority that "Attach to Kiro" did not open itself is confirmed first, with
+   pod, container, context and kubeconfig spelled out, since the kubeconfig decides which server
+   kubectl contacts and can run commands (exec credential plugins); a kubeconfig on a network share
+   is refused. `PodResolver` then asks `kubectl get pod` (with the kubeconfig _of the connection_, not
    of the current settings) and refuses with a clear message unless the pod and container are
    running. It then provisions the server through `kubectl exec ... -- sh -s`, as for containers,
    and returns the connection factory.
-5. **Where the server lives.** `$HOME` if it is a writable directory, otherwise `/tmp`; the
-   detection script and the install script apply the same rule. Pods often run as a user without a
-   home directory.
+5. **Where the server lives.** `$HOME` if it is a writable directory, otherwise the private folder
+   `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`), which is used only if it is a real directory
+   the user owns (then set to mode 700): anyone could have created that predictable name first,
+   with a server launcher of their own. The detection script and the install script share this
+   rule (`CHOOSE_BASE_SCRIPT`). Pods often run as a user without a home directory.
 
 Limits: the pod needs `sh`, `curl` or `wget` and `tar`; `kubectl exec` streams can be cut by proxies
 or API server timeouts on long idle periods (the window then reconnects); the server and what it
@@ -133,7 +155,9 @@ installed disappear with the pod.
 - **Container identity** comes from the CLI's own labels (`devcontainer.local_folder`,
   `devcontainer.config_file`), so containers started from a terminal with the CLI are reused.
 - **Authorities are untrusted input** (they can come from links): decoded strictly, paths are only
-  passed as arguments, never through a shell.
+  passed as arguments, never through a shell, network paths (`\\host\share`, `\\?\UNC\...`,
+  `//host/...`) are refused because reading one already contacts that host, and an authority the
+  extension did not open itself is used only after the user confirms the folder or pod.
 
 ## Assumptions and how they held up
 
@@ -163,7 +187,11 @@ which `node` the bridge uses (the server's bundled one if present, else the cont
 
 - The extension declares `untrustedWorkspaces: { supported: false }`.
 - Values interpolated into generated shell scripts are validated against a strict pattern and
-  single-quoted; the download URL must be `http(s)` or `file`.
+  single-quoted; the download URL must be `https` or `file`.
+- Unknown remote authorities are confirmed before use; network paths are refused.
+- The Kiro sign-in is copied only after the user agrees (default) and only into a container
+  without one.
+- Values of `-e`, `--env`, `--build-arg` and `--remote-env` in logged command lines are masked.
 - The connection token is generated in the container, stored with mode 600 and passed to the
   server as a file, not as an argument.
 - `argv.json` is only modified after an explicit modal confirmation.

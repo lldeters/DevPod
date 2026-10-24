@@ -66,8 +66,13 @@ Features contribute. From it the resolver reads:
   lets `"db:5432"` reach another container of a Compose project. `forwardPorts` entries are opened
   during resolution and returned as `environmentTunnels`, so the Ports view shows them as already
   forwarded. They are replaced on every resolution and closed when the resolver is disposed.
-  Every request of the IDE and its outcome is logged at info level; the first refused connection
-  per tunnel too. The resolver brings its own factory on purpose: in VS Code 1.131.0 the IDE enables
+  When the IDE names no local port, the remote port is used, as the IDE's own tunnels do
+  (`suggestedLocalPort ?? tunnelRemotePort`). This is required for sign-in flows: for a link that
+  carries `http://localhost:<port>` in its query string (`redirect_uri=http://localhost:3128`) the
+  workbench opens a tunnel without a local port and leaves the link unchanged
+  (`window.ts`, `resolveExternalUri`), so the browser reaches the service only on that very port.
+  Every request of the IDE and its outcome is logged at info level, a local port that could not be
+  used at warn level; the first refused connection per tunnel is logged too. The resolver brings its own factory on purpose: in VS Code 1.131.0 the IDE enables
   the full Ports features, including automatic detection of new listening ports, only when the
   resolver provides a `tunnelFactory` (`mainThreadTunnelService.ts`, `$setTunnelProvider`;
   `remoteExplorer.ts`, `startCandidateListener`). The built-in factory for managed authorities does

@@ -295,51 +295,37 @@ Hake die Punkte aus 10c ab und schreib mir bei jedem, der nicht klappt, **was du
 Protokoll ist hier besonders hilfreich. Wenn die Extension nicht erscheint, ist das wichtig zu
 wissen: Dann prüfe ich, ob Kiros Server den Startparameter akzeptiert.
 
-### 10e: Anmeldung in Kiro im Container-Fenster („Connection refused“)
+### 10e: Anmeldung in Kiro im Container-Fenster
 
-**Hintergrund:** Ein neuer Container hat ein leeres Home-Verzeichnis. Kiro legt die Anmeldung
-vermutlich als Datei dort ab (laut Drittquellen `~/.aws/sso/cache/kiro-auth-token.json`; von Kiro
-selbst nicht bestätigt). Dass du dich im **neuen** Container einmal erneut anmelden musst, ist
-deshalb wahrscheinlich normal. Bei der Anmeldung über Google oder GitHub läuft der Server, der die
-Rückmeldung des Browsers entgegennimmt (`http://localhost:<PORT>/oauth/callback`), **im Container**.
-Der Browser sitzt aber auf deinem Rechner. Die Anmeldung klappt nur, wenn genau dieser Port vom
-Container auf deinen Rechner weitergeleitet ist. „Connection refused“ heißt: In dem Moment lauscht
-auf deinem Rechner nichts an diesem Port.
+**Was passiert:** Ein neuer Container hat ein leeres Home-Verzeichnis, deshalb will Kiro dort eine
+Anmeldung. Kiro schickt den Browser mit `redirect_uri=http://localhost:3128` zur Anmeldung. Der
+Server, der die Antwort entgegennimmt, läuft **im Container**. Damit der Browser ihn erreicht, muss
+der Container-Port 3128 auf deinem Rechner **unter derselben Nummer 3128** weitergeleitet werden.
 
-Die automatische Port-Erkennung von Kiro prüft nur alle paar Sekunden. Gut möglich, dass der
-Browser schneller war. So findest du es heraus, **ohne die Anmeldung neu zu starten**:
+**Fehler in der Version aus Schritt 10:** Für diese Weiterleitung nennt VS Code keinen lokalen Port.
+Meine Version nahm dann einen zufälligen, VS Codes eingebaute nimmt den Port des Containers. Der
+Browser kam deshalb an 3128 nicht an („Connection refused“). Im ersten Test (Schritt 7) gab es
+meine Weiterleitung noch nicht, daher ging die Anmeldung dort durch. Das ist in der neuen Version
+behoben.
 
-1. Öffne das Ports-Panel: Befehlspalette → **„Ports: Focus on Ports View“**.
-2. Starte die Anmeldung und klicke den Google-Link. Wenn die Fehlerseite erscheint: **Tab offen
-   lassen** und aus der Adresszeile die Portnummer ablesen (`localhost:`**`12345`**`/oauth/callback…`).
-3. Schau ins Ports-Panel:
-   - **Der Port steht jetzt in der Liste:** Lade den Browser-Tab neu (F5). Wenn die Anmeldung
-     dann durchgeht, war es nur ein Zeitproblem.
-   - **Der Port fehlt:** Klicke im Ports-Panel auf **„Forward a Port“**, gib die Portnummer ein,
-     und lade danach den Tab neu.
-4. Schreib mir: Ist der Port von selbst erschienen (wie lange nach dem Klick)? Hat das Neuladen
-   geholfen? Und: War im **ersten** Container-Test (Schritt 7) auch eine Anmeldung nötig?
+**Test:** Installiere die neueste Version aus dem **neuesten grünen Lauf** (wie in 10a), öffne das
+Projekt im Container und melde dich mit Google an.
 
-**Alternative ohne Port:** Wähle auf dem Anmeldebildschirm statt Google/GitHub die Anmeldung mit
-**AWS Builder ID** oder **IAM Identity Center**. Laut Kiro-Team läuft sie auf entfernten Rechnern
-über einen Gerätecode (Adresse und Code im Browser eingeben, kein Rückweg nötig). Ob das auch in
-der IDE so ist, ist mir nicht bestätigt; probiere es gern aus.
+- [ ] Die Anmeldung geht durch und Kiro kehrt zur Oberfläche zurück.
+- [ ] Im Protokoll (Ansicht → Ausgabe → „Kiro Dev Containers“) stehen Zeilen wie
+      `The IDE asked to forward localhost:3128; trying local port 3128.` und
+      `Forwarding localhost:3128 to localhost:3128`.
 
-**Protokoll:** Die neue Version schreibt jede Weiterleitung, die Kiro anfordert, in **Ansicht →
-Ausgabe → „Kiro Dev Containers“**, zum Beispiel
-`The IDE asked to forward localhost:12345 (preferred local port: 12345).` und
-`Forwarding localhost:12345 to localhost:12345`. Das trennt die Fälle:
+**Wenn es wieder scheitert**, schick mir das Protokoll. Bedeutung der Zeilen:
 
-| Im Protokoll nach dem Klick auf den Google-Link                   | Bedeutung                                                                                         |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| keine Zeile zum Port                                              | Kiro hat den Port nie angefordert (Erkennung zu langsam oder Port wird nicht erkannt).            |
-| `The IDE asked to forward …` und `Forwarding …`, Browser lehnt ab | Die Weiterleitung steht, aber etwas dahinter stimmt nicht (zum Beispiel IPv4/IPv6). Log schicken. |
-| `Could not forward …`                                             | Die Weiterleitung selbst ist gescheitert. Die Meldung steht dahinter.                             |
-| `Port … refused the connection …`                                 | Die Weiterleitung steht, aber im Container lauscht nichts (mehr) an dem Port.                     |
+| Zeile im Protokoll                       | Bedeutung                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| keine Zeile mit „asked to forward“       | Kiro hat die Weiterleitung nie angefordert; der Fehler liegt woanders.                                  |
+| `Local port 3128 is not available, so …` | Port 3128 ist auf deinem Rechner belegt oder gesperrt. Prüfe `netstat -ano \| findstr :3128` (Windows). |
+| `Could not forward …`                    | Die Weiterleitung selbst ist gescheitert. Die Meldung steht dahinter.                                   |
+| `Port … refused the connection …`        | Die Weiterleitung steht, aber im Container lauscht (noch) nichts an dem Port.                           |
 
-Für Fortgeschrittene: **„Developer: Set Log Level…“ → Trace**, Anmeldung wiederholen, dann in
-**Ausgabe → „Window“** nach `ForwardedPorts` filtern. Dort steht, welche Ports Kiro erkannt hat
-und warum es einen nicht weitergeleitet hat.
+Für Pod-Fenster (Schritt 11) gilt dasselbe.
 
 ---
 

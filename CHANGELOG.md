@@ -23,4 +23,7 @@ First experimental version.
 - Port forwarding: `forwardPorts` are forwarded on start and the IDE's own forwards (Ports view,
   automatic detection) are tunneled to localhost; supports `"service:port"` for Compose.
 - Port forwards requested by the IDE, their failures and the first refused connection per tunnel
-  are written to the log, which makes a failing sign-in callback in a container window traceable.
+  are written to the log.
+- Fix: a tunnel the IDE requests without a local port now uses the remote port (as VS Code's own
+  tunnels do) instead of a random one. Kiro's sign-in sends the browser to a fixed
+  `http://localhost:3128` callback, which was refused before.

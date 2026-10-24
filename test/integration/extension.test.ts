@@ -458,11 +458,11 @@ child.on('exit', (code) => process.exit(code ?? 1));
     while (cleanups.length > 0) await cleanups.pop()?.();
   });
 
-  function startEcho(): Promise<number> {
+  function startEcho(host = '127.0.0.1'): Promise<number> {
     return new Promise((resolve) => {
       const server = net.createServer((socket) => socket.pipe(socket));
       cleanups.push(() => new Promise<void>((done) => server.close(() => done())));
-      server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
+      server.listen(0, host, () => resolve((server.address() as net.AddressInfo).port));
     });
   }
 
@@ -602,10 +602,51 @@ child.on('exit', (code) => process.exit(code ?? 1));
     // Each request of the IDE leaves a trace; this is what tells a failed login callback apart.
     const info = logger.entries.filter((e) => e.level === 'info').map((e) => e.message);
     expect(info).toContain(
-      `The IDE asked to forward localhost:${remote} (preferred local port: any).`,
+      `The IDE asked to forward localhost:${remote}; trying local port ${remote}.`,
     );
     expect(info).toContain(`Forwarding localhost:${remote} to localhost:${local}`);
     expect(info).toContain(`Stopped forwarding localhost:${remote}.`);
+    // Here the "container" is this machine, so the remote port is taken locally and another is used.
+    expect(
+      logger.entries.some((e) => e.level === 'warn' && e.message.includes('is not available')),
+    ).toBe(true);
+  });
+
+  // Sign-in flows give the browser a fixed `http://localhost:<port>` callback address, and the IDE
+  // asks for that tunnel without naming a local port. The local port must then equal the remote one.
+  // The "container" is this machine, so its service sits on 127.0.0.2 to leave the port free here.
+  it.skipIf(process.platform !== 'linux')(
+    'uses the remote port as the local port when the IDE names none',
+    async () => {
+      const remote = await startEcho('127.0.0.2');
+      const { resolver } = setup({});
+      await resolver.resolve(authority());
+
+      const tunnel = await resolver.tunnelFactory({
+        remoteAddress: { host: '127.0.0.2', port: remote },
+      });
+      expect((tunnel.localAddress as { port: number }).port).toBe(remote);
+      expect(await echoThrough(remote, 'callback')).toBe('callback');
+      await tunnel.dispose();
+    },
+  );
+
+  it('uses the local port the IDE asks for', async () => {
+    const remote = await startEcho();
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const free = (probe.address() as net.AddressInfo).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    const { resolver } = setup({});
+    await resolver.resolve(authority());
+
+    const tunnel = await resolver.tunnelFactory({
+      remoteAddress: { host: 'localhost', port: remote },
+      localAddressPort: free,
+    });
+    expect((tunnel.localAddress as { port: number }).port).toBe(free);
+    expect(await echoThrough(free, 'hi')).toBe('hi');
+    await tunnel.dispose();
   });
 
   it('refuses tunnels before a container is connected', async () => {

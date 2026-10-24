@@ -45,7 +45,9 @@ export class TunnelHub implements vscode.Disposable {
   async factory(options: vscode.TunnelOptions): Promise<vscode.Tunnel> {
     const { host, port } = options.remoteAddress;
     const remote = `${host}:${port}`;
-    const preferred = options.localAddressPort;
+    // Like the IDE's own tunnels: without a requested local port, use the remote one. Sign-in flows
+    // hand the browser a fixed `http://localhost:<port>` callback address and only work this way.
+    const wanted = options.localAddressPort ?? port;
     const target = this.target;
     if (!target) {
       this.logger.log(
@@ -54,26 +56,24 @@ export class TunnelHub implements vscode.Disposable {
       );
       throw new Error('The remote window is not connected yet.');
     }
-    this.logger.log(
-      'info',
-      `The IDE asked to forward ${remote} (preferred local port: ${preferred ?? 'any'}).`,
-    );
+    this.logger.log('info', `The IDE asked to forward ${remote}; trying local port ${wanted}.`);
 
     let tunnel: OpenTunnel;
     try {
-      tunnel = await this.open(target, options.remoteAddress, preferred);
+      tunnel = await this.open(target, options.remoteAddress, wanted);
     } catch (error) {
       this.logger.log('warn', `Could not forward ${remote}: ${errorMessage(error)}`);
       throw error;
     }
     this.tunnels.add(tunnel);
-    this.logger.log(
-      'info',
-      `Forwarding ${remote} to localhost:${tunnel.local.port}` +
-        (preferred !== undefined && preferred !== tunnel.local.port
-          ? ` (local port ${preferred} was not available)`
-          : ''),
-    );
+    this.logger.log('info', `Forwarding ${remote} to localhost:${tunnel.local.port}`);
+    if (tunnel.local.port !== wanted) {
+      this.logger.log(
+        'warn',
+        `Local port ${wanted} is not available, so ${remote} is reachable at localhost:${tunnel.local.port} only. ` +
+          `Anything that expects localhost:${wanted} on this machine will be refused.`,
+      );
+    }
 
     const disposed = new vscode.EventEmitter<void>();
     return {

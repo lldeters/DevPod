@@ -46,8 +46,8 @@ Containers" extension. It builds on the public specification and the open-source
 - No telemetry.
 
 Planned: Templates and "Add Dev Container Configuration Files", Attach to Running Container,
-Clone Repository in Container Volume, credential forwarding, remote Docker hosts and more. See
-[docs/PLAN.md](docs/PLAN.md).
+Clone Repository in Container Volume, credential forwarding, remote Docker hosts and more. Ideas and
+bug reports are welcome in the [issue tracker](https://github.com/lldeters/DevPod/issues).
 
 ## Requirements
 
@@ -57,7 +57,10 @@ Clone Repository in Container Volume, credential forwarding, remote Docker hosts
 
 ## Setup
 
-1. Install the `.vsix` (Extensions view → `...` → _Install from VSIX_).
+1. Install **Dev Containers for Kiro (Community)** (`lldeters.devcontainers-kiro`) from the
+   Extensions view, which searches [Open VSX](https://open-vsx.org). A `.vsix` from the
+   [releases](https://github.com/lldeters/DevPod/releases) works too (Extensions view → `...` →
+   _Install from VSIX_).
 2. Run **Kiro Dev Containers: Enable Remote Support (proposed API)**. This adds this extension's
    ID to `enable-proposed-api` in the IDE's `argv.json` after you confirm. Quit and restart the
    IDE completely.
@@ -128,7 +131,8 @@ A new container has an empty home directory, so Kiro asks for a sign-in again. A
 Google or GitHub sends the browser to `http://localhost:3128`, where a service **inside the
 container** waits for the answer. The extension forwards that port to the same port number on your
 machine, so it must be free there. If the sign-in fails, the log (_Kiro Dev Containers_) shows
-whether the port was requested and forwarded; see `docs/ANLEITUNG-KIRO-TEST.md`, step 10e.
+whether the port was requested (_The IDE asked to forward ..._) and on which local port it was
+forwarded (_Forwarding ... to localhost:..._).
 
 ### Skipping the sign-in: `dev.containers.shareKiroLogin`
 
@@ -175,8 +179,9 @@ npx vsce package              # builds the .vsix
 DCK_E2E=1 npm run test:e2e    # needs a running Docker daemon
 ```
 
-Architecture and decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Contributions are
-welcome: [CONTRIBUTING.md](CONTRIBUTING.md).
+Architecture and decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Releasing:
+[docs/RELEASING.md](docs/RELEASING.md). Contributions are welcome:
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

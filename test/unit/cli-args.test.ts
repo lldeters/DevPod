@@ -100,4 +100,43 @@ describe('resolveCliLocation', () => {
       env: { ELECTRON_RUN_AS_NODE: '1' },
     });
   });
+
+  it('runs a user-provided .js file as Node, too', () => {
+    expect(
+      resolveCliLocation({
+        customPath: '/opt/cli/devcontainer.js',
+        bundledEntry: '/e.js',
+        nodeExecutable: '/ide',
+      }),
+    ).toEqual({
+      command: '/ide',
+      args: ['/opt/cli/devcontainer.js'],
+      env: { ELECTRON_RUN_AS_NODE: '1' },
+    });
+  });
+
+  it("runs the script behind npm's Windows wrapper instead of the batch file", () => {
+    const shim = 'C:\\Users\\me\\AppData\\Roaming\\npm\\devcontainer.cmd';
+    const entry =
+      'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@devcontainers\\cli\\devcontainer.js';
+    expect(
+      resolveCliLocation({
+        customPath: shim,
+        bundledEntry: '/e.js',
+        nodeExecutable: 'C:\\Kiro\\Kiro.exe',
+        exists: (file) => file === entry,
+      }),
+    ).toEqual({ command: 'C:\\Kiro\\Kiro.exe', args: [entry], env: { ELECTRON_RUN_AS_NODE: '1' } });
+  });
+
+  it('explains what to set when a batch file cannot be mapped to the script', () => {
+    expect(() =>
+      resolveCliLocation({
+        customPath: 'D:\\tools\\devcontainer.bat',
+        bundledEntry: '/e.js',
+        nodeExecutable: 'n',
+        exists: () => false,
+      }),
+    ).toThrowError(/batch file.*devcontainer\.js/s);
+  });
 });

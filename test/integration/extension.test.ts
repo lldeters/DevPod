@@ -241,7 +241,10 @@ describe('inside a dev container window', () => {
     await mock.commands.executeCommand(Commands.rebuildContainerNoCache);
 
     const authority = encodeAuthority({ hostPath: sub });
-    expect(globalState.get(`rebuild:${authority}`)).toEqual({ noCache: true });
+    expect(globalState.get(`rebuild:${authority}`)).toEqual({
+      noCache: true,
+      requestedAt: expect.any(Number),
+    });
     expect(state.executed.at(-1)?.command).toBe('workbench.action.reloadWindow');
   });
 

@@ -66,7 +66,8 @@ jobs:
             echo "::error::The repository secret OVSX_PAT (an Open VSX access token) is not set."
             exit 1
           fi
-          npx ovsx publish --packagePath devcontainers-kiro.vsix
+          # --skip-duplicate keeps a re-run working when Open VSX already has this version.
+          npx ovsx publish --packagePath devcontainers-kiro.vsix --skip-duplicate
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

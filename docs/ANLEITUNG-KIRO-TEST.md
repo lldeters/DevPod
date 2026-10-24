@@ -140,8 +140,13 @@ Set-Content $HOME\kiro-devcontainer-test\.devcontainer\devcontainer.json '{ "nam
 
 ## Schritt 7: Im Container öffnen
 
-1. Stelle die Protokollstufe auf ausführlich, damit ich bei Problemen mehr sehe:
-   **Einstellungen** (Strg+, / Cmd+,) → suche `dev.containers.logLevel` → wähle **`debug`**.
+1. _(Optional, nicht nötig für den ersten Versuch.)_ Stelle die Protokollstufe auf ausführlich,
+   damit ich bei Problemen mehr sehe: **Einstellungen** (Strg+, / Cmd+,) → suche
+   `dev.containers.logLevel` → wähle **`debug`**.
+   Findest du die Einstellung nicht, ist die Extension in Kiro nicht installiert oder nicht
+   aktiv (siehe die Tabelle am Ende). Übergehe den Schritt dann zunächst. Alternativ trägst du sie
+   von Hand ein: Befehlspalette → **„Preferences: Open User Settings (JSON)“** und füge innerhalb der
+   geschweiften Klammern `"dev.containers.logLevel": "debug"` ein (mit Komma, falls davor etwas steht).
 2. Kiro zeigt unten rechts evtl. von selbst die Frage _„This folder contains a dev container
    configuration. Reopen it in a container?“_. Klicke **„Reopen in Container“**.
    Sonst: Befehlspalette → **„Kiro Dev Containers: Reopen in Container“**.
@@ -219,13 +224,13 @@ bleiben deshalb drin.
 
 ## Wenn etwas hakt – schnelle Hilfe
 
-| Problem                                             | Was tun                                                                                    |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Es erscheinen keine „Kiro Dev Containers“-Befehle   | Extensions-Ansicht prüfen, ob die Extension installiert und aktiviert ist; Kiro neu laden  |
-| „Remote support is not enabled“                     | Schritt 4 wiederholen und Kiro **komplett** beenden und neu starten                        |
-| „Could not run docker“ / „service is not reachable“ | Docker starten (Schritt 1)                                                                 |
-| Sehr lange Wartezeit bei „Starting Dev Container“   | Beim ersten Mal normal (Image-Download). Nach ~10 Min ohne Fortschritt: Protokoll schicken |
-| Kiro friert beim Neustart ein                       | Task-Manager/Aktivitätsanzeige: alle Kiro-Prozesse beenden, neu starten                    |
+| Problem                                                                               | Was tun                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keine „Kiro Dev Containers“-Befehle, oder die Einstellungen `dev.containers.*` fehlen | Extensions-Ansicht (Strg/Cmd+Umschalt+X) → _Installed_: Ist „Dev Containers for Kiro (Community)“ aufgeführt und **nicht** deaktiviert? Läuft Kiro im „Restricted Mode“ (Ordner nicht als vertrauenswürdig eingestuft), vertraue dem Ordner (Befehl „Workspaces: Manage Workspace Trust“): Die Extension läuft aus Sicherheitsgründen nicht in nicht vertrauenswürdigen Ordnern. Danach Kiro neu laden. Ist sie gar nicht aufgeführt, wiederhole Schritt 3 |
+| „Remote support is not enabled“                                                       | Schritt 4 wiederholen und Kiro **komplett** beenden und neu starten                                                                                                                                                                                                                                                                                                                                                                                        |
+| „Could not run docker“ / „service is not reachable“                                   | Docker starten (Schritt 1)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Sehr lange Wartezeit bei „Starting Dev Container“                                     | Beim ersten Mal normal (Image-Download). Nach ~10 Min ohne Fortschritt: Protokoll schicken                                                                                                                                                                                                                                                                                                                                                                 |
+| Kiro friert beim Neustart ein                                                         | Task-Manager/Aktivitätsanzeige: alle Kiro-Prozesse beenden, neu starten                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Wenn du bei einem Schritt nicht weiterkommst, schreib mir einfach, **bei welchem Schritt** du bist
 und was du siehst. Ein Screenshot hilft meistens am meisten.

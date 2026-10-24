@@ -302,17 +302,24 @@ Anmeldung. Kiro schickt den Browser mit `redirect_uri=http://localhost:3128` zur
 Server, der die Antwort entgegennimmt, läuft **im Container**. Damit der Browser ihn erreicht, muss
 der Container-Port 3128 auf deinem Rechner **unter derselben Nummer 3128** weitergeleitet werden.
 
-**Fehler in der Version aus Schritt 10:** Für diese Weiterleitung nennt VS Code keinen lokalen Port.
-Meine Version nahm dann einen zufälligen, VS Codes eingebaute nimmt den Port des Containers. Der
-Browser kam deshalb an 3128 nicht an („Connection refused“). Im ersten Test (Schritt 7) gab es
-meine Weiterleitung noch nicht, daher ging die Anmeldung dort durch. Das ist in der neuen Version
-behoben.
+**Der eigentliche Fehler (gefunden, in der neuen Version behoben):** Kiro ruft die Weiterleitungs-
+Funktion meiner Extension **ohne Bezug zur Extension** auf. Meine Funktion griff aber auf Daten der
+Extension zu und brach deshalb bei jedem Aufruf mit
+`Cannot read properties of undefined (reading 'factory')` ab. Es entstand gar keine Weiterleitung,
+und der Browser fand an Port 3128 nichts („Connection refused“). Meine Tests riefen die Funktion
+immer direkt an der Extension auf und konnten das nicht bemerken. Sie rufen sie jetzt so auf wie
+Kiro. Im ersten Test (Schritt 7) gab es meine Weiterleitung noch nicht, daher ging die Anmeldung
+dort durch. Außerdem nimmt die Weiterleitung jetzt, wie VS Codes eigene, denselben lokalen Port
+wie im Container, wenn Kiro keinen nennt (der erste Fehler, den ich vermutet hatte, der aber allein
+nicht das Problem war).
 
 **Test:** Installiere die neueste Version aus dem **neuesten grünen Lauf** (wie in 10a), öffne das
 Projekt im Container und melde dich mit Google an.
 
 - [ ] Die Anmeldung geht durch und Kiro kehrt zur Oberfläche zurück.
-- [ ] Im Protokoll (Ansicht → Ausgabe → „Kiro Dev Containers“) stehen Zeilen wie
+- [ ] Im Protokoll (Ansicht → Ausgabe → „Kiro Dev Containers“) steht oben die Zeile
+      `Dev Containers for Kiro 0.1.0 (build 1234abc) in Kiro …` (die Build-Kennung steht auch in
+      der Diagnose) und nach dem Klick auf den Google-Link Zeilen wie
       `The IDE asked to forward localhost:3128; trying local port 3128.` und
       `Forwarding localhost:3128 to localhost:3128`.
 

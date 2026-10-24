@@ -60,7 +60,10 @@ Features contribute. From it the resolver reads:
   rewritten. The text is written through a quoted here-document with a random delimiter. A problem
   here is logged and does not stop the connection. `portsAttributes` and `otherPortsAttributes` use
   the same shape as `remote.portsAttributes` / `remote.otherPortsAttributes` and travel the same way.
-- **Ports.** `resolver.tunnelFactory` is called by the IDE for every forward. It opens a local TCP
+- **Ports.** `resolver.tunnelFactory` is called by the IDE for every forward. It is an arrow
+  function property: the IDE stores the function and calls it detached from the resolver
+  (`this._forwardPortProvider(...)` in `extHostTunnelService.ts`), so a prototype method would find
+  no `this`. The tests call it the same way (`test/helpers/ide.ts`). It opens a local TCP
   server on `127.0.0.1` (the requested local port if free) and relays each connection through its
   own `docker exec -i … node -e <bridge> <port> [host]` (`src/core/tunnel.ts`). The optional host
   lets `"db:5432"` reach another container of a Compose project. `forwardPorts` entries are opened

@@ -21,6 +21,7 @@ import { activate } from '../../src/extension';
 import { RebuildRequests } from '../../src/remote/rebuildRequests';
 import { DevContainerResolver } from '../../src/remote/resolver';
 import { Commands } from '../../src/ui/commands';
+import { callLikeTheIde } from '../helpers/ide';
 import * as mock from '../helpers/vscodeMock';
 
 const { state } = mock;
@@ -585,7 +586,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
     const { resolver, logger } = setup({});
     await resolver.resolve(authority());
 
-    const tunnel = await resolver.tunnelFactory({
+    const tunnel = await callLikeTheIde(resolver.tunnelFactory, {
       remoteAddress: { host: 'localhost', port: remote },
     });
     const local = (tunnel.localAddress as { port: number }).port;
@@ -622,7 +623,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
       const { resolver } = setup({});
       await resolver.resolve(authority());
 
-      const tunnel = await resolver.tunnelFactory({
+      const tunnel = await callLikeTheIde(resolver.tunnelFactory, {
         remoteAddress: { host: '127.0.0.2', port: remote },
       });
       expect((tunnel.localAddress as { port: number }).port).toBe(remote);
@@ -640,7 +641,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
     const { resolver } = setup({});
     await resolver.resolve(authority());
 
-    const tunnel = await resolver.tunnelFactory({
+    const tunnel = await callLikeTheIde(resolver.tunnelFactory, {
       remoteAddress: { host: 'localhost', port: remote },
       localAddressPort: free,
     });
@@ -652,7 +653,7 @@ child.on('exit', (code) => process.exit(code ?? 1));
   it('refuses tunnels before a container is connected', async () => {
     const { resolver } = setup({});
     await expect(
-      resolver.tunnelFactory({ remoteAddress: { host: 'localhost', port: 3000 } }),
+      callLikeTheIde(resolver.tunnelFactory, { remoteAddress: { host: 'localhost', port: 3000 } }),
     ).rejects.toThrow(/not connected/);
   });
 

@@ -22,8 +22,12 @@ First experimental version.
   forwarding. The IDE server falls back to `/tmp` when the home directory is not writable.
 - Port forwarding: `forwardPorts` are forwarded on start and the IDE's own forwards (Ports view,
   automatic detection) are tunneled to localhost; supports `"service:port"` for Compose.
+- The log starts with the version and build (commit hash); diagnostics contain it too.
 - Port forwards requested by the IDE, their failures and the first refused connection per tunnel
   are written to the log.
+- Fix: port forwarding failed on every request of the IDE, because the IDE calls `tunnelFactory`
+  detached from the resolver and the function used `this`. It is now an arrow function property,
+  and the tests call it like the IDE does. This was the cause of the refused sign-in callback.
 - Fix: a tunnel the IDE requests without a local port now uses the remote port (as VS Code's own
   tunnels do) instead of a random one. Kiro's sign-in sends the browser to a fixed
   `http://localhost:3128` callback, which was refused before.

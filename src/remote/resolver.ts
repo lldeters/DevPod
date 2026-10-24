@@ -63,10 +63,12 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
     }
   }
 
-  /** Called by the IDE for every port it forwards, manually or automatically. */
-  tunnelFactory(options: vscode.TunnelOptions): Promise<vscode.Tunnel> {
-    return this.hub.factory(options);
-  }
+  /**
+   * Called by the IDE for every port it forwards, manually or automatically. The IDE stores this
+   * function and calls it detached from the resolver, so it must not rely on its own `this`.
+   */
+  readonly tunnelFactory = (options: vscode.TunnelOptions): Promise<vscode.Tunnel> =>
+    this.hub.factory(options);
 
   dispose(): void {
     this.hub.dispose();

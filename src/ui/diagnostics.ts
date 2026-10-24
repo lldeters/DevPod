@@ -3,6 +3,7 @@
 
 import * as os from 'node:os';
 import * as vscode from 'vscode';
+import { BUILD_ID } from '../buildInfo';
 import { isProposedApiEnabled } from '../core/argv';
 import type { DevContainerCli } from '../core/cli/devcontainerCli';
 import { redactHome, summarizeProduct } from '../core/diagnostics';
@@ -42,7 +43,7 @@ export async function collectDiagnostics(
 
   return {
     generatedAt: new Date().toISOString(),
-    extension: { id: deps.extensionId, version: deps.extensionVersion },
+    extension: { id: deps.extensionId, version: deps.extensionVersion, build: BUILD_ID },
     ide: {
       appName: vscode.env.appName,
       vscodeVersion: vscode.version,

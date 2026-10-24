@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from 'vscode';
+import { BUILD_ID } from './buildInfo';
 import { AUTHORITY_PREFIX } from './core/authority';
 import { DevContainerCli, resolveCliLocation } from './core/cli/devcontainerCli';
 import { ContainerEngine } from './core/engine/containerEngine';
@@ -24,6 +25,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = new OutputLogger();
   context.subscriptions.push(output);
   const logger = output.filtered(() => readSettings().logLevel);
+  logger.log(
+    'info',
+    `Dev Containers for Kiro ${
+      (context.extension.packageJSON as { version?: string } | undefined)?.version ?? 'unknown'
+    } (build ${BUILD_ID}) in ${vscode.env.appName} ${vscode.version}`,
+  );
 
   const engine = new ContainerEngine(() => readSettings().dockerPath);
   const cli = new DevContainerCli(

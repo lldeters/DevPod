@@ -22,6 +22,7 @@ import { encodePodAuthority } from '../../src/core/k8s/podRef';
 import type { PodRef } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
 import { PodResolver } from '../../src/remote/podResolver';
+import { callLikeTheIde } from '../helpers/ide';
 import * as mock from '../helpers/vscodeMock';
 import { createKubectlStub, podJson } from '../helpers/kubectlStub';
 import type { KubectlStub } from '../helpers/kubectlStub';
@@ -219,7 +220,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       const { resolver } = createResolver();
       await resolver.resolve(encodePodAuthority(ref));
 
-      const tunnel = await resolver.tunnelFactory({
+      const tunnel = await callLikeTheIde(resolver.tunnelFactory, {
         remoteAddress: { host: 'localhost', port: remote },
       });
       const local = (tunnel.localAddress as { port: number }).port;
@@ -236,7 +237,9 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
     it('refuses tunnels before the pod is attached', async () => {
       const { resolver } = createResolver();
       await expect(
-        resolver.tunnelFactory({ remoteAddress: { host: 'localhost', port: 3000 } }),
+        callLikeTheIde(resolver.tunnelFactory, {
+          remoteAddress: { host: 'localhost', port: 3000 },
+        }),
       ).rejects.toThrow(/not connected/);
     });
 

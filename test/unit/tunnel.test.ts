@@ -186,10 +186,20 @@ describe('openTunnel', () => {
       logger,
     );
     cleanups.push(() => tunnel.close());
+    const refusals = () => logger.entries.filter((entry) => entry.message.includes('refused'));
+    // The client sees the connection end before the exit of the bridge process is logged, so wait
+    // for the log entry instead of assuming it is there when the client has finished.
+    const logged = async (count: number) => {
+      for (let waited = 0; refusals().length < count && waited < 5000; waited += 10) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    };
     await roundTrip(tunnel.local.port, Buffer.from('one'));
+    await logged(1);
     await roundTrip(tunnel.local.port, Buffer.from('two'));
+    await logged(2);
 
-    const refused = logger.entries.filter((entry) => entry.message.includes('refused'));
+    const refused = refusals();
     expect(refused.map((entry) => entry.level)).toEqual(['info', 'debug']);
     expect(refused[0]?.message).toContain(`localhost:${dead}`);
   });

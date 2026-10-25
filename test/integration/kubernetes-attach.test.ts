@@ -258,6 +258,20 @@ describe('which kubectl and kubeconfig are used', () => {
     expect(effectiveKubeconfig()).toBeUndefined();
   });
 
+  it("ignores the Kubernetes extension's paths when a workspace sets them", () => {
+    state.workspaceSettings['vscode-kubernetes.kubectl-path'] =
+      '\\\\attacker.example\\s\\kubectl.exe';
+    state.workspaceSettings['vs-kubernetes'] = {
+      'vs-kubernetes.kubeconfig': '/workspace/.kube/config',
+    };
+    expect(effectiveKubectlPath()).toBe('kubectl');
+    expect(effectiveKubeconfig()).toBeUndefined();
+    state.settings['vscode-kubernetes.kubectl-path'] = '/usr/local/bin/kubectl';
+    state.settings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': '/home/me/.kube/config' };
+    expect(effectiveKubectlPath()).toBe('/usr/local/bin/kubectl'); // the user's own value
+    expect(effectiveKubeconfig()).toBe('/home/me/.kube/config');
+  });
+
   it('reads ~ as the home directory, since kubectl is started without a shell', () => {
     state.settings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': '~/.kube/other' };
     state.settings['vscode-kubernetes.kubectl-path'] = '~/bin/kubectl';

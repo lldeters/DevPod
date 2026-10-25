@@ -7,7 +7,10 @@ type Handler = (...args: any[]) => unknown;
 
 export const state = {
   workspaceFolders: undefined as { uri: Uri; name: string; index: number }[] | undefined,
+  /** User settings. */
   settings: {} as Record<string, unknown>,
+  /** Workspace settings; they win over user settings in `get`, as in the IDE. */
+  workspaceSettings: {} as Record<string, unknown>,
   registeredCommands: new Map<string, Handler>(),
   executed: [] as { command: string; args: unknown[] }[],
   infoMessages: [] as string[],
@@ -37,6 +40,7 @@ export const state = {
 export function reset(): void {
   state.workspaceFolders = undefined;
   state.settings = {};
+  state.workspaceSettings = {};
   state.registeredCommands.clear();
   state.executed = [];
   state.infoMessages = [];
@@ -204,7 +208,13 @@ export const workspace = {
   getConfiguration: (section?: string) => {
     const full = (key: string): string => (section ? `${section}.${key}` : key);
     return {
-      get: <T>(key: string): T | undefined => state.settings[full(key)] as T | undefined,
+      get: <T>(key: string): T | undefined =>
+        (state.workspaceSettings[full(key)] ?? state.settings[full(key)]) as T | undefined,
+      inspect: <T>(key: string) => ({
+        key: full(key),
+        globalValue: state.settings[full(key)] as T | undefined,
+        workspaceValue: state.workspaceSettings[full(key)] as T | undefined,
+      }),
       update: async (key: string, value: unknown): Promise<void> => {
         state.settings[full(key)] = value;
       },

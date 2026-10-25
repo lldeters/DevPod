@@ -49,31 +49,42 @@ export function expandHome(file: string): string {
 }
 
 /**
+ * A setting of the Kubernetes extension as the user set it. Those settings can also come from a
+ * workspace, but a program to run, or a kubeconfig (which decides the server and can run commands),
+ * must not: this extension's own path settings have scope `machine` for the same reason.
+ */
+function userValue<T>(section: string | undefined, key: string): T | undefined {
+  return vscode.workspace.getConfiguration(section).inspect<T>(key)?.globalValue;
+}
+
+/**
  * The kubectl binary: this extension's setting, else the one the Kubernetes extension is
- * configured with (per OS, then general), else `kubectl` from PATH.
+ * configured with in the user settings (per OS, then general), else `kubectl` from PATH.
  */
 export function effectiveKubectlPath(): string {
   const own = readSettings().kubectlPath;
   if (own) {
     return expandHome(own);
   }
-  const k8s = vscode.workspace.getConfiguration('vscode-kubernetes');
   const os =
     process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
-  const configured = nonEmpty(k8s.get(`kubectl-path-${os}`)) ?? nonEmpty(k8s.get('kubectl-path'));
+  const configured =
+    nonEmpty(userValue('vscode-kubernetes', `kubectl-path-${os}`)) ??
+    nonEmpty(userValue('vscode-kubernetes', 'kubectl-path'));
   return configured ? expandHome(configured) : 'kubectl';
 }
 
-/** The kubeconfig file: this extension's setting, else the Kubernetes extension's, else kubectl's own lookup. */
+/**
+ * The kubeconfig file: this extension's setting, else the Kubernetes extension's from the user
+ * settings, else kubectl's own lookup.
+ */
 export function effectiveKubeconfig(): string | undefined {
   const own = readSettings().kubeconfigPath;
   if (own) {
     return expandHome(own);
   }
   // The Kubernetes extension keeps its settings as an object with dotted keys.
-  const settings = vscode.workspace
-    .getConfiguration()
-    .get<Record<string, unknown>>('vs-kubernetes');
+  const settings = userValue<Record<string, unknown>>(undefined, 'vs-kubernetes');
   const configured = nonEmpty(settings?.['vs-kubernetes.kubeconfig']);
   return configured === undefined ? undefined : expandHome(configured);
 }

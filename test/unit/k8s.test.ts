@@ -34,6 +34,15 @@ describe('pod authority', () => {
     expect(encodePodAuthority(ref)).toMatch(/^k8s-pod\+[0-9a-f]+$/);
   });
 
+  it('rejects a kubeconfig path that could add lines to the confirmation dialog', () => {
+    expect(() =>
+      decodePodAuthority(
+        hex({ v: 1, ...ref, kubeconfig: "/tmp/k\n\nkubeconfig: kubectl's default" }),
+      ),
+    ).toThrowError(/kubeconfig path/);
+    expect(() => assertPodRef({ ...ref, kubeconfig: '/home/me/\u202Egifnoc' })).toThrow();
+  });
+
   it('rejects a kubeconfig on a network share, but not one in WSL', () => {
     expect(() =>
       decodePodAuthority(hex({ v: 1, ...ref, kubeconfig: '\\\\attacker.example\\s\\config' })),

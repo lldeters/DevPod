@@ -34,8 +34,24 @@ export function isNetworkPath(candidate: string): boolean {
   return /^[\\/]{2}/.test(candidate) && !/^[\\/]{2}(wsl\$|wsl\.localhost)[\\/]/i.test(candidate);
 }
 
+// Control characters (line breaks among them) and bidirectional controls. A path from an authority
+// is shown in the confirmation dialog; with them, a link could add its own lines to that dialog or
+// make the path read differently than it is.
+// eslint-disable-next-line no-control-regex
+const UNSAFE_CHARACTERS = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/;
+
+/** Whether `value` contains a character that could disguise what a dialog shows. */
+export function hasUnsafeCharacters(value: string): boolean {
+  return UNSAFE_CHARACTERS.test(value);
+}
+
 function assertPath(value: unknown, field: string): asserts value is string {
-  if (typeof value !== 'string' || value === '' || value.includes('\0') || !isAbsolute(value)) {
+  if (
+    typeof value !== 'string' ||
+    value === '' ||
+    hasUnsafeCharacters(value) ||
+    !isAbsolute(value)
+  ) {
     throw new DevContainerError(
       'AUTHORITY_INVALID',
       `The remote authority has an invalid ${field}.`,

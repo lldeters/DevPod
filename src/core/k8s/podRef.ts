@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as path from 'node:path';
-import { isNetworkPath } from '../authority';
+import { hasUnsafeCharacters, isNetworkPath } from '../authority';
 import { DevContainerError } from '../errors';
 
 /** Remote authority prefix for Kubernetes pods: `k8s-pod+<hex>`. */
@@ -41,7 +41,7 @@ export function assertPodRef(ref: PodRef): void {
   }
   if (
     ref.kubeconfig !== undefined &&
-    (ref.kubeconfig.includes('\0') ||
+    (hasUnsafeCharacters(ref.kubeconfig) ||
       !(path.posix.isAbsolute(ref.kubeconfig) || path.win32.isAbsolute(ref.kubeconfig)))
   ) {
     fail('kubeconfig path');

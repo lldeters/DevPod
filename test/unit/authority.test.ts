@@ -3,6 +3,7 @@ import {
   decodeAuthority,
   encodeAuthority,
   isDevContainerAuthority,
+  hasUnsafeCharacters,
   isNetworkPath,
 } from '../../src/core/authority';
 
@@ -75,6 +76,29 @@ describe('authority', () => {
       '\\\\wsl$\\Ubuntu\\home\\me\\app',
       '\\\\wsl.localhost\\Ubuntu\\home\\me',
     ]) {
+      expect(decodeAuthority(encodeAuthority({ hostPath }))).toEqual({ hostPath });
+    }
+  });
+
+  // The path is shown in the confirmation dialog; these would let a link write into it.
+  it.each([
+    ['a line break', '/tmp/x\n\nYou opened this folder yourself earlier. It is safe.'],
+    ['a carriage return', '/tmp/x\rsafe'],
+    ['a tab', '/tmp/a\tb'],
+    ['a C1 control', '/tmp/a\u0085b'],
+    ['a right-to-left override', '/home/me/\u202Eexe.nigol\u202C/projects'],
+    ['an isolate', '/home/me/\u2067x\u2069'],
+    ['a direction mark', '/home/me/\u200Fx'],
+  ])('rejects a path with %s, which could disguise the confirmation dialog', (_name, hostPath) => {
+    expect(() => decodeAuthority(hex({ v: 1, hostPath }))).toThrowError(/invalid folder path/);
+    expect(() => decodeAuthority(hex({ v: 1, hostPath: '/x', configFile: hostPath }))).toThrowError(
+      /invalid configuration path/,
+    );
+    expect(hasUnsafeCharacters(hostPath)).toBe(true);
+  });
+
+  it('still accepts paths with spaces, umlauts and other scripts', () => {
+    for (const hostPath of ['/home/me/my project', 'C:\\Users\\Jörg\\プロジェクト', '/srv/مشروع']) {
       expect(decodeAuthority(encodeAuthority({ hostPath }))).toEqual({ hostPath });
     }
   });

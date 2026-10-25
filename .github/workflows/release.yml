@@ -2,7 +2,8 @@ name: Release
 
 # Publishes the extension to Open VSX when a tag v<version> is pushed. It publishes the VSIX that the
 # full CI (including the Docker and Kubernetes end-to-end tests) built and tested for that commit.
-# Needs the repository secret OVSX_PAT; see docs/RELEASING.md.
+# Needs the repository secret OVSX_PAT; see docs/RELEASING.md. No checkout keeps the token in
+# .git/config, and no dependency install script runs where the write token or OVSX_PAT is used.
 on:
   push:
     tags: ['v*']
@@ -22,6 +23,8 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - id: check
         run: |
           version="$(node -p "require('./package.json').version")"
@@ -49,11 +52,14 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # Only ovsx is needed here, and it needs no install scripts; this job may write releases.
+      - run: npm ci --ignore-scripts
       - name: Fetch the VSIX that CI built and tested
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:

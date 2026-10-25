@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { redactHome, summarizeProduct } from '../../src/core/diagnostics';
+import { redactHomeDeep, summarizeProduct } from '../../src/core/diagnostics';
 
 describe('summarizeProduct', () => {
   const product = {
@@ -67,10 +67,54 @@ describe('summarizeProduct', () => {
   });
 });
 
-describe('redactHome', () => {
-  it('replaces only a leading home directory', () => {
-    expect(redactHome('/home/alice/.kiro/argv.json', '/home/alice')).toBe('~/.kiro/argv.json');
-    expect(redactHome('/opt/home/alice/x', '/home/alice')).toBe('/opt/home/alice/x');
-    expect(redactHome('/anything', '')).toBe('/anything');
+describe('redactHomeDeep', () => {
+  it('replaces the home directory in every string, also inside messages', () => {
+    expect(
+      redactHomeDeep(
+        {
+          path: '/home/alice/.kiro/argv.json',
+          containerEngine: {
+            command: '/home/alice/bin/podman',
+            version: { error: 'Could not run "/home/alice/bin/podman". Install Docker.' },
+          },
+          list: ['/home/alice', 'x /home/alice/y'],
+          count: 3,
+          nothing: null,
+        },
+        '/home/alice',
+        false,
+      ),
+    ).toEqual({
+      path: '~/.kiro/argv.json',
+      containerEngine: {
+        command: '~/bin/podman',
+        version: { error: 'Could not run "~/bin/podman". Install Docker.' },
+      },
+      list: ['~', 'x ~/y'],
+      count: 3,
+      nothing: null,
+    });
+  });
+
+  it('does not touch a longer name that merely starts like the home directory', () => {
+    expect(redactHomeDeep('/home/alice2/x and /home/alice', '/home/alice', false)).toBe(
+      '/home/alice2/x and ~',
+    );
+  });
+
+  it('on Windows, ignores case and accepts both kinds of slash', () => {
+    expect(
+      redactHomeDeep(
+        'C:\\Users\\Alice\\docker.exe; c:\\users\\alice\\x; C:/Users/Alice/y',
+        'C:\\Users\\Alice',
+        true,
+      ),
+    ).toBe('~\\docker.exe; ~\\x; ~/y');
+  });
+
+  it('leaves everything alone for an empty or root home directory', () => {
+    expect(redactHomeDeep('/anything', '', false)).toBe('/anything');
+    expect(redactHomeDeep('/anything', '/', false)).toBe('/anything');
+    expect(redactHomeDeep('C:\\x', 'C:\\', true)).toBe('C:\\x');
   });
 });

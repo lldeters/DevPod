@@ -64,7 +64,33 @@ export function summarizeProduct(product: unknown): ProductSummary {
   return summary;
 }
 
-/** Replaces the home directory prefix so pasted diagnostics do not reveal the user name. */
-export function redactHome(text: string, home: string): string {
-  return home !== '' && text.startsWith(home) ? `~${text.slice(home.length)}` : text;
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Replaces the home directory with `~` in every string of `value` (also inside error messages and
+ * paths that only contain it), so pasted diagnostics do not reveal the user name. A match must end
+ * at a path separator, a quote, whitespace or the end, so `/home/al` does not hit `/home/alice`.
+ * On Windows paths are compared case-insensitively and with either kind of slash.
+ */
+export function redactHomeDeep(value: unknown, home: string, windows: boolean): unknown {
+  const trimmed = home.replace(/[\\/]+$/, '');
+  if (trimmed === '' || /^[A-Za-z]:$/.test(trimmed)) {
+    return value; // a root "home" would replace every path
+  }
+  const forms = windows ? [...new Set([trimmed, trimmed.replace(/\\/g, '/')])] : [trimmed];
+  const pattern = new RegExp(
+    `(?:${forms.map(escapeRegExp).join('|')})(?=$|[\\\\/\\s"'\`:;,)\\]])`,
+    windows ? 'gi' : 'g',
+  );
+  const visit = (entry: unknown): unknown => {
+    if (typeof entry === 'string') return entry.replace(pattern, '~');
+    if (Array.isArray(entry)) return entry.map(visit);
+    if (typeof entry === 'object' && entry !== null) {
+      return Object.fromEntries(Object.entries(entry).map(([key, inner]) => [key, visit(inner)]));
+    }
+    return entry;
+  };
+  return visit(value);
 }

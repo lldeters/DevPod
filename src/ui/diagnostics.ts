@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import { BUILD_ID } from '../buildInfo';
 import { isProposedApiEnabled } from '../core/argv';
 import type { DevContainerCli } from '../core/cli/devcontainerCli';
-import { redactHome, summarizeProduct } from '../core/diagnostics';
+import { redactHomeDeep, summarizeProduct } from '../core/diagnostics';
 import type { ContainerEngine } from '../core/engine/containerEngine';
 import { errorMessage } from '../core/errors';
 import { readProduct } from '../remote/product';
@@ -33,7 +33,8 @@ async function attempt<T>(run: () => Promise<T>): Promise<T | { error: string }>
 
 /**
  * Facts needed to judge whether and how this extension can work in the running IDE. Contains no
- * credentials, no workspace content and no user name (the home directory is shortened to `~`).
+ * credentials, no workspace content and no user name: the home directory is replaced by `~` in
+ * every value, error messages and configured paths included.
  */
 export async function collectDiagnostics(
   deps: DiagnosticsDependencies,
@@ -41,7 +42,7 @@ export async function collectDiagnostics(
   const settings = readSettings();
   const argvPath = await argvJsonPath().catch(() => undefined);
 
-  return {
+  const report = {
     generatedAt: new Date().toISOString(),
     extension: { id: deps.extensionId, version: deps.extensionVersion, build: BUILD_ID },
     ide: {
@@ -58,7 +59,7 @@ export async function collectDiagnostics(
     },
     argvJson: argvPath
       ? {
-          path: redactHome(argvPath, os.homedir()),
+          path: argvPath,
           listsThisExtension: await attempt(async () =>
             isProposedApiEnabled(await readIfExists(argvPath), deps.extensionId),
           ),
@@ -75,6 +76,10 @@ export async function collectDiagnostics(
       logLevel: settings.logLevel,
     },
   };
+  return redactHomeDeep(report, os.homedir(), process.platform === 'win32') as Record<
+    string,
+    unknown
+  >;
 }
 
 /** Copies the report to the clipboard and shows it, so it can be pasted into a chat or issue. */

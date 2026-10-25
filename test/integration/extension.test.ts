@@ -461,6 +461,30 @@ describe('Show Diagnostics', () => {
     expect(report['argvJson'].listsThisExtension).toBe(false);
     expect(state.errorMessages).toEqual([]);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'leaves the home directory out of every value, error messages included',
+    async () => {
+      const previousHome = process.env['HOME'];
+      process.env['HOME'] = root; // the home directory os.homedir() reports
+      try {
+        process.env['VSCODE_PORTABLE'] = path.join(root, 'nowhere');
+        state.appRoot = productDir;
+        state.settings['dev.containers.dockerPath'] = path.join(root, 'tools', 'docker');
+        activateExtension();
+
+        await mock.commands.executeCommand(Commands.showDiagnostics);
+
+        const report = JSON.parse(state.clipboard) as Record<string, any>;
+        expect(report['containerEngine'].command).toBe('~/tools/docker');
+        expect(report['containerEngine'].version.error).toContain('~/tools/docker');
+        expect(state.clipboard).not.toContain(root);
+      } finally {
+        if (previousHome === undefined) delete process.env['HOME'];
+        else process.env['HOME'] = previousHome;
+      }
+    },
+  );
 });
 
 describe('DevContainerResolver: customizations and port forwarding', () => {

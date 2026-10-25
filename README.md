@@ -9,8 +9,9 @@ tooling running in it.
 > _Reopen in Container_, terminal and file editing in the container, installing extensions, a Kiro
 > agent session, _Rebuild Container_, _Reopen Folder Locally_, reconnecting to a running container,
 > extensions and settings from `customizations.vscode`, port forwarding (configured and
-> automatically detected), the Kiro sign-in inside the container, and attaching to a pod of Docker
-> Desktop's Kubernetes.
+> automatically detected), the Kiro sign-in inside the container, copying the sign-in after the
+> question, attaching to a pod of Docker Desktop's Kubernetes, and the confirmation of windows the
+> extension did not open itself.
 > **Not yet verified in Kiro:** macOS and Linux hosts, Podman, Docker Compose and Dockerfile based
 > configurations, sub folders of Git repositories, several configurations in one folder, and other
 > clusters than Docker Desktop's (these are covered by automated tests only, including a real kind
@@ -158,8 +159,9 @@ Be aware of what a copy means:
 - To remove a copy, run `rm ~/.aws/sso/cache/kiro-auth-token.json` in the container, or sign out in
   Kiro there.
 
-Verified so far: Kiro in a pod accepted a file copied there by hand. The setting itself has been
-tested automatically (including real containers and pods in CI) but not yet in Kiro.
+Verified in Kiro 1.4.26 on Windows: the question, and Kiro in a container or pod accepting the
+copied sign-in (see [docs/TESTING.md](docs/TESTING.md)). Whether a renewal on one side signs out the
+other is not known yet.
 
 ## Security
 

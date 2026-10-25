@@ -188,10 +188,15 @@ which `node` the bridge uses (the server's bundled one if present, else the cont
 - The extension declares `untrustedWorkspaces: { supported: false }`.
 - Values interpolated into generated shell scripts are validated against a strict pattern and
   single-quoted; the download URL must be `https` or `file`.
-- Unknown remote authorities are confirmed before use; network paths are refused.
+- Unknown remote authorities are confirmed before use; network paths and paths with control or
+  bidirectional characters (which could add text to the confirmation dialog) are refused.
 - The Kiro sign-in is copied only after the user agrees (default) and only into a container
   without one.
-- Values of `-e`, `--env`, `--build-arg` and `--remote-env` in logged command lines are masked.
+- Values of `-e`, `--env`, `--build-arg` and `--remote-env` in logged command lines are masked, and
+  so are the values of the CLI's environment variables whose names look like secrets (at least 8
+  characters), in every log line, progress message and error message from the CLI.
+- The kubectl path and kubeconfig taken over from the Kubernetes extension are read from the user
+  settings only (`inspect().globalValue`), so a workspace cannot choose a program or kubeconfig.
 - The connection token is generated in the container, stored with mode 600 and passed to the
   server as a file, not as an argument.
 - `argv.json` is only modified after an explicit modal confirmation.

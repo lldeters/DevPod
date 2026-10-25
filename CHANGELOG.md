@@ -25,8 +25,9 @@ First public, experimental version.
   a container or pod that has none; `always` and `never` decide once.
 - Safety: a container or pod window that the extension did not open itself (for example from a
   link) is only resolved after you confirm the folder or pod; paths on network shares are refused;
-  the server is downloaded over `https` only; values of environment arguments are masked in the
-  log. The extension is disabled in untrusted workspaces.
+  the server is downloaded over `https` only; secret values are masked in the log; paths to programs
+  and kubeconfig files never come from a workspace. The extension is disabled in untrusted
+  workspaces.
 - One-time setup of `enable-proposed-api` in `argv.json`, and **Show Diagnostics**, which copies
   the facts needed to analyze a problem (no credentials) to the clipboard.
 - Verified in Kiro 1.4.26 on Windows with Docker 29.2.0 (see `docs/TESTING.md`); other hosts and

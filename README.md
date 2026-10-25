@@ -120,8 +120,9 @@ the private folder `devcontainers-kiro-<uid>` of `$TMPDIR` (or `/tmp`); that fol
 it is a directory the user owns. It is not part of the pod's image, so it is installed again after
 the pod is recreated.
 Images without a shell (for example distroless images) cannot be used. `kubectl` must be installed
-and able to reach the cluster; the path and kubeconfig of the Kubernetes extension are honored, or
-set `dev.containers.kubectlPath` / `dev.containers.kubeconfigPath`.
+and able to reach the cluster; the path and kubeconfig set for the Kubernetes extension in your user
+settings are honored (workspace values are not), or set `dev.containers.kubectlPath` /
+`dev.containers.kubeconfigPath`.
 
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.

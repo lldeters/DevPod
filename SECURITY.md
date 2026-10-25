@@ -17,7 +17,8 @@ steps to reproduce and the impact you see.
   and handed to the server as a file.
 - Remote authorities can originate from links. They are strictly validated and only used as
   arguments to the Dev Container CLI or kubectl, never through a shell. Folder, configuration and
-  kubeconfig paths on network shares are refused. An authority that the extension did not open
+  kubeconfig paths on network shares, and paths with control or bidirectional characters (which
+  could disguise the confirmation dialog), are refused. An authority that the extension did not open
   itself ("Reopen in Container", "Attach to Kiro") is only used after the user confirms the folder
   or pod in a modal dialog: resolving it runs the folder's configuration, including
   `initializeCommand` on this machine, or kubectl with the kubeconfig it names.
@@ -26,7 +27,10 @@ steps to reproduce and the impact you see.
 - The IDE server is downloaded over `https` only (or from a file inside the container). In the
   fallback folder used when the home directory is not writable, the server is installed only if
   that folder belongs to the user.
-- Values of environment and build arguments are masked in logged command lines, so a log can be
-  shared.
+- Values of environment and build arguments, and the values of environment variables whose names
+  look like secrets (for example `NPM_TOKEN`), are masked in everything logged or shown from the
+  Dev Container CLI, so a log can be shared. Show Diagnostics replaces the home directory by `~`.
+- Paths to programs and to kubeconfig files come from user (or machine) settings only, never from a
+  workspace; this includes the fallback to the Kubernetes extension's settings.
 - The extension edits the IDE's `argv.json` (to enable a proposed API) only after an explicit
   confirmation.

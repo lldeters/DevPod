@@ -4,6 +4,8 @@ import {
   parseReadConfigurationResult,
   parseUpResult,
   redactEnvValues,
+  redactValues,
+  secretValues,
 } from '../../src/core/cli/output';
 import type { DevContainerError } from '../../src/core/errors';
 
@@ -64,6 +66,42 @@ describe('redactEnvValues', () => {
     expect(
       parseCliLogLine('{"type":"start","level":2,"text":"Run: docker run -e API_KEY=k1 img"}').text,
     ).toBe('Run: docker run -e API_KEY=*** img');
+  });
+});
+
+describe('secretValues and redactValues', () => {
+  it('picks the values of secret-looking variables, longest first', () => {
+    expect(
+      secretValues({
+        NPM_TOKEN: 'npm_abcdefgh',
+        GITHUB_TOKEN: 'ghp_0123456789abcdef',
+        AWS_SECRET_ACCESS_KEY: 'wJalrXUtnFEMI/K7MDENG',
+        DB_PASSWORD: 'correct horse',
+        OPENAI_API_KEY: 'sk-1234567890',
+        DEPLOY_PAT: 'pat-12345678',
+        SHORT_TOKEN: 'abc', // too short: would hide ordinary text
+        HOME: '/home/someone',
+        PATH: '/usr/bin:/bin',
+        EMPTY_SECRET: undefined,
+      }),
+    ).toEqual([
+      'wJalrXUtnFEMI/K7MDENG',
+      'ghp_0123456789abcdef',
+      'correct horse',
+      'sk-1234567890',
+      'npm_abcdefgh',
+      'pat-12345678',
+    ]);
+  });
+
+  it('replaces every occurrence, also inside a longer word', () => {
+    expect(
+      redactValues(
+        'Run in container: npm config set //r/:_authToken=npm_abcdefgh && echo npm_abcdefgh!',
+        ['npm_abcdefgh'],
+      ),
+    ).toBe('Run in container: npm config set //r/:_authToken=*** && echo ***!');
+    expect(redactValues('nothing to hide', [])).toBe('nothing to hide');
   });
 });
 

@@ -42,6 +42,31 @@ export function redactEnvValues(text: string): string {
   return text.replace(ENV_ARGUMENT, '$1$2$3$4=***');
 }
 
+// Names of environment variables that usually hold secrets. Their values reach the CLI's output
+// wherever devcontainer.json uses ${localEnv:...}, for example in a lifecycle command, which the CLI
+// logs at debug level.
+const SECRET_NAME =
+  /token|secret|passw(or)?d|credential|auth|private_?key|api_?key|access_?key|(^|_)(key|pat)$/i;
+// Shorter values would also hide ordinary words and numbers in the log.
+const MIN_SECRET_LENGTH = 8;
+
+/** Values of `env` whose names look like secrets, longest first. */
+export function secretValues(env: NodeJS.ProcessEnv): string[] {
+  const values = new Set<string>();
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined && value.length >= MIN_SECRET_LENGTH && SECRET_NAME.test(name)) {
+      values.add(value);
+    }
+  }
+  // Longest first, so that a value contained in another one does not leave the rest visible.
+  return [...values].sort((a, b) => b.length - a.length);
+}
+
+/** Replaces every occurrence of each of `values` in `text` with `***`. */
+export function redactValues(text: string, values: readonly string[]): string {
+  return values.reduce((current, value) => current.split(value).join('***'), text);
+}
+
 function clean(text: string): string {
   return redactEnvValues(text.replace(ANSI_ESCAPE, ''));
 }

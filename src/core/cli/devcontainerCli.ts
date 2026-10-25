@@ -13,6 +13,8 @@ import {
   parseReadConfigurationResult,
   parseUpResult,
   redactEnvValues,
+  redactValues,
+  secretValues,
 } from './output';
 import type { CliLogEvent, ReadConfigurationResult, UpSuccess } from './output';
 
@@ -104,8 +106,8 @@ export class DevContainerCli {
 
   /** Creates (or reuses) the dev container and runs its lifecycle commands. */
   async up(options: UpOptions, handlers: CliRunHandlers = {}): Promise<UpSuccess> {
-    const stdout = await this.run(upArgs({ ...this.defaults(), ...options }), handlers);
-    return parseUpResult(stdout);
+    const { stdout, redact } = await this.run(upArgs({ ...this.defaults(), ...options }), handlers);
+    return redactingErrors(() => parseUpResult(stdout), redact);
   }
 
   /** Reads the resolved configuration, including the workspace path inside the container. */
@@ -113,26 +115,38 @@ export class DevContainerCli {
     options: ReadConfigurationOptions,
     handlers: CliRunHandlers = {},
   ): Promise<ReadConfigurationResult> {
-    const stdout = await this.run(
+    const { stdout, redact } = await this.run(
       readConfigurationArgs({ ...this.defaults(), ...options }),
       handlers,
     );
-    return parseReadConfigurationResult(stdout);
+    return redactingErrors(() => parseReadConfigurationResult(stdout), redact);
   }
 
-  private async run(args: string[], handlers: CliRunHandlers): Promise<string> {
-    this.logger.log('debug', redactEnvValues(`devcontainer ${args.join(' ')}`));
+  /**
+   * Runs the CLI. Everything it reports (log lines, progress, error messages) is cleared of the
+   * secret-looking values of its environment before it is logged or shown; see `secretValues`.
+   */
+  private async run(
+    args: string[],
+    handlers: CliRunHandlers,
+  ): Promise<{ stdout: string; redact: (text: string) => string }> {
+    const location = this.location();
+    const env = { ...process.env, ...location.env };
+    const secrets = secretValues(env);
+    const redact = (text: string): string => redactValues(text, secrets);
+
+    this.logger.log('debug', redact(redactEnvValues(`devcontainer ${args.join(' ')}`)));
     const forwardLog = (line: string): void => {
       const event = parseCliLogLine(line);
-      this.logger.log(event.level, event.text);
-      handlers.onLog?.(event);
+      const text = redact(event.text);
+      this.logger.log(event.level, text);
+      handlers.onLog?.({ ...event, text });
     };
 
-    const location = this.location();
     let result;
     try {
       result = await runProcess(location.command, [...location.args, ...args], {
-        env: { ...process.env, ...location.env },
+        env,
         onStderrLine: forwardLog,
         ...(handlers.signal ? { signal: handlers.signal } : {}),
       });
@@ -148,7 +162,7 @@ export class DevContainerCli {
 
     // On failure the CLI still prints a JSON error document on stdout; let the parser report it.
     if (result.code !== 0 && result.stdout.trim() === '') {
-      const tail = result.stderr.trim().split('\n').slice(-5).join('\n');
+      const tail = redact(result.stderr.trim().split('\n').slice(-5).join('\n'));
       throw new DevContainerError(
         'CLI_FAILED',
         `The Dev Container CLI exited with code ${result.code ?? result.signal ?? 'unknown'}.${
@@ -156,6 +170,18 @@ export class DevContainerCli {
         }`,
       );
     }
-    return result.stdout;
+    return { stdout: result.stdout, redact };
+  }
+}
+
+/** The CLI's error document can quote a failed command; its message is cleared like the log. */
+function redactingErrors<T>(parse: () => T, redact: (text: string) => string): T {
+  try {
+    return parse();
+  } catch (error) {
+    if (error instanceof DevContainerError) {
+      throw new DevContainerError(error.code, redact(error.message));
+    }
+    throw error;
   }
 }

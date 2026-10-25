@@ -1,9 +1,10 @@
 name: Release
 
-# Publishes the extension to Open VSX when a tag v<version> is pushed. It publishes the VSIX that the
-# full CI (including the Docker and Kubernetes end-to-end tests) built and tested for that commit.
-# Needs the repository secret OVSX_PAT; see docs/RELEASING.md. No checkout keeps the token in
-# .git/config, and no dependency install script runs where the write token or OVSX_PAT is used.
+# Publishes the extension to Open VSX when a tag v<version> is pushed, or created by publishing a
+# release in the GitHub UI. It publishes the VSIX that the full CI (including the Docker and
+# Kubernetes end-to-end tests) built and tested for that commit. Needs the repository secret
+# OVSX_PAT; see docs/RELEASING.md. No checkout keeps the token in .git/config, and no dependency
+# install script runs where the write token or OVSX_PAT is used.
 on:
   push:
     tags: ['v*']
@@ -74,7 +75,7 @@ jobs:
           fi
           # --skip-duplicate keeps a re-run working when Open VSX already has this version.
           npx ovsx publish --packagePath devcontainers-kiro.vsix --skip-duplicate
-      - name: Create the GitHub release
+      - name: Create or complete the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -82,5 +83,14 @@ jobs:
           awk -v heading="## $VERSION " 'index($0, heading) == 1 { found = 1; next }
             found && /^## / { exit } found' CHANGELOG.md > notes.md
           cp devcontainers-kiro.vsix "devcontainers-kiro-$VERSION.vsix"
-          gh release create "$GITHUB_REF_NAME" "devcontainers-kiro-$VERSION.vsix" \
-            --title "$VERSION" --notes-file notes.md
+          # A release published in the GitHub UI creates the tag that started this run: attach the
+          # VSIX to it, and keep its notes unless it has none. A re-run finds its own release.
+          if body="$(gh release view "$GITHUB_REF_NAME" --json body --jq .body 2>/dev/null)"; then
+            gh release upload "$GITHUB_REF_NAME" "devcontainers-kiro-$VERSION.vsix" --clobber
+            if [ -z "$body" ]; then
+              gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" "devcontainers-kiro-$VERSION.vsix" \
+              --title "$VERSION" --notes-file notes.md
+          fi

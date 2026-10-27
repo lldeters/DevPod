@@ -3,6 +3,7 @@
 
 import { DevContainerError } from '../errors';
 import { isValidExtensionId } from '../extensionId';
+import { urlForLog } from './template';
 
 export const INSTALL_MARKER = 'devcontainers-kiro-server';
 
@@ -42,14 +43,17 @@ export interface InstallScriptParams {
 
 /**
  * POSIX sh that sets `BASE` to the folder below which the server lives: the user's `$HOME` if it is
- * a writable directory, else `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`). The fallback is
- * private to the user and refused (BASE stays empty) unless it is a real directory the user owns,
- * because anyone could have created that predictable name first. The platform check and the
- * install script both use it, so they agree on the folder.
+ * a writable directory that not everyone can write to (some images set `HOME=/tmp`), else
+ * `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`). The fallback is private to the user and
+ * refused (BASE stays empty) unless it is a real directory the user owns, because anyone could have
+ * created that predictable name first. The platform check and the install script both use it, so
+ * they agree on the folder.
  */
 export const CHOOSE_BASE_SCRIPT = `
+# Whether everyone may write to directory $1, as to /tmp: nothing in it is private.
+shared_dir() { case "$(stat -L -c %A "$1" 2>/dev/null || true)" in ????????w?) return 0 ;; esac; return 1; }
 BASE="\${HOME:-}"
-if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ]; then
+if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ] || shared_dir "$BASE"; then
   case "\${TMPDIR:-}" in /*) BASE="$TMPDIR" ;; *) BASE=/tmp ;; esac
   USER_ID="$(id -u 2>/dev/null || true)"
   BASE="\${BASE%/}/devcontainers-kiro-$USER_ID"
@@ -108,9 +112,13 @@ umask 077
 echo "${INSTALL_MARKER}: start"
 TMP_DIR=""
 LOCK_DIR=""
+OWNER=""
 cleanup() {
   if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi
-  if [ -n "$LOCK_DIR" ]; then rm -rf "$LOCK_DIR"; fi
+  # Only a lock this run still holds: one that was taken over meanwhile belongs to another run.
+  if [ -n "$LOCK_DIR" ] && [ "$(cat "$LOCK_DIR/owner" 2>/dev/null || true)" = "$OWNER" ]; then
+    rm -rf "$LOCK_DIR"
+  fi
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -128,6 +136,7 @@ DATA_FOLDER=${shQuote(params.dataFolderName)}
 COMMIT=${shQuote(params.commit)}
 APP_NAME=${shQuote(params.applicationName)}
 DOWNLOAD_URL=${shQuote(params.downloadUrl)}
+DOWNLOAD_LABEL=${shQuote(urlForLog(params.downloadUrl))}
 ${CHOOSE_BASE_SCRIPT}
 [ -n "$BASE" ] || fail "no usable folder for the server: the home directory is not writable, and the fallback in the temporary directory is not a private folder of this user"
 ROOT="$BASE/$DATA_FOLDER"
@@ -141,14 +150,17 @@ PORT_FILE="$ROOT/server-$COMMIT.port"
 mkdir -p "$ROOT/bin" || fail "cannot create $ROOT"
 
 # One run at a time per folder: two windows may connect at once. The owner of the lock is recorded
-# so that a lock left behind by a killed run can be taken over.
+# so that a lock left behind by a killed run can be taken over. The owner is written right after the
+# lock is created, so a lock without one for a whole minute was left by a run killed in between,
+# not by a slow one.
+OWNER="$$ $(proc_start $$)"
 WAITED=0
 UNOWNED=0
 until mkdir "$ROOT/setup.lock" 2>/dev/null; do
   HOLDER="$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)"
   if [ -n "$HOLDER" ]; then UNOWNED=0; else UNOWNED=$((UNOWNED + 1)); fi
   # shellcheck disable=SC2086 # the owner file holds "<pid> <start time>"
-  if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 5 ]; then
+  if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 60 ]; then
     rm -rf "$ROOT/setup.lock"
     continue
   fi
@@ -157,7 +169,7 @@ until mkdir "$ROOT/setup.lock" 2>/dev/null; do
   sleep 1
 done
 LOCK_DIR="$ROOT/setup.lock"
-echo "$$ $(proc_start $$)" > "$LOCK_DIR/owner"
+echo "$OWNER" > "$LOCK_DIR/owner"
 
 if [ ! -f "$SERVER_DIR/.installed" ]; then
   TMP_DIR="$(mktemp -d "$ROOT/tmp.XXXXXX")" || fail "mktemp failed"
@@ -165,9 +177,18 @@ if [ ! -f "$SERVER_DIR/.installed" ]; then
   if command -v curl >/dev/null 2>&1; then
     # The archive becomes code in the container: https only (or a local file), also after redirects.
     curl -fsSL --proto '=https,file' --proto-redir '=https' --retry 3 --connect-timeout 20 \\
-      -o "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_URL"
+      -o "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_LABEL"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_URL"
+    # wget cannot be told to stay on https after a redirect, so the response headers are kept and
+    # a redirect anywhere else fails the download before the archive is used.
+    wget -S -O "$ARCHIVE" "$DOWNLOAD_URL" 2> "$TMP_DIR/wget.log" || fail "download failed: $DOWNLOAD_LABEL"
+    sed -n 's/^ *[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]: *//p' "$TMP_DIR/wget.log" | tr -d '\\r' > "$TMP_DIR/redirects"
+    while IFS= read -r LOCATION; do
+      case "$LOCATION" in
+        [Hh][Tt][Tt][Pp][Ss]://* | /*) ;;
+        *:*) fail "the download was redirected to an address that is not https" ;;
+      esac
+    done < "$TMP_DIR/redirects"
   else
     fail "neither curl nor wget is installed in the container"
   fi
@@ -187,6 +208,8 @@ if [ -f "$PORT_FILE" ] && [ -f "$TOKEN_FILE" ] \\
 else
   rm -f "$PID_FILE" "$START_FILE" "$PORT_FILE" "$TOKEN_FILE" "$LOG_FILE"
   TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \\n')"
+  # A failure inside the pipeline does not stop the script (set -e only sees tr).
+  [ "\${#TOKEN}" -eq 48 ] || fail "could not create a connection token from /dev/urandom"
   printf '%s' "$TOKEN" > "$TOKEN_FILE"
   if command -v setsid >/dev/null 2>&1; then LAUNCH="setsid nohup"; else LAUNCH="nohup"; fi
   # --server-data-dir keeps the server's data (extensions, settings, state) next to it, which

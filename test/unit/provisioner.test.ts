@@ -71,6 +71,29 @@ describe('provisionServer', () => {
     expect(executor.calls[1]?.stdin).toContain("DOWNLOAD_URL='https://mirror.example/abc123.tgz'");
   });
 
+  it('keeps the credentials of a private mirror out of the log and the messages', async () => {
+    const executor = fakeExecutor([platformOut, installOut]);
+    const logger = new MemoryLogger();
+    await provisionServer(
+      executor,
+      {
+        containerId: 'c1',
+        build,
+        urlTemplate: 'https://me:s3cret@mirror.example/${commit}.tgz?sig=t0ken',
+      },
+      logger,
+    );
+    const script = executor.calls[1]?.stdin ?? '';
+    expect(script).toContain(
+      "DOWNLOAD_URL='https://me:s3cret@mirror.example/abc123.tgz?sig=t0ken'",
+    );
+    expect(script).toContain("DOWNLOAD_LABEL='https://mirror.example/abc123.tgz'");
+    expect(script).not.toMatch(/fail "[^"\n]*\$DOWNLOAD_URL/);
+    const logged = logger.entries.map((entry) => entry.message).join('\n');
+    expect(logged).toContain('https://mirror.example/abc123.tgz');
+    expect(logged).not.toMatch(/s3cret|t0ken/);
+  });
+
   it('explains what to do when no download URL is known, before touching the container', async () => {
     const executor = fakeExecutor([]);
     const { downloadUrlTemplate: _template, ...withoutTemplate } = build;
@@ -319,7 +342,7 @@ describe('provisionServer with the Kiro sign-in', () => {
 
   it.each([
     ['exists', 'info', 'already has a Kiro sign-in'],
-    ['nohome', 'warn', 'no writable home directory'],
+    ['nohome', 'warn', 'no private, writable home directory'],
   ])('reports %s', async (answer, level, text) => {
     const executor = fakeExecutor([platformOut, ok(`${answer}\n`), installOut]);
     const logger = new MemoryLogger();

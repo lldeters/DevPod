@@ -14,6 +14,17 @@
   container, a pod, kubectl or the Dev Container CLI into a clickable link.
 - The log masks the values of more variables that usually hold secrets (names with `passphrase`,
   `cookie`, `session`, `jwt`, `bearer`, or ending in `key` or `pat`).
+- Server installation in the container:
+  - With `wget` instead of `curl`, a download that is redirected to anything but `https` fails
+    before the archive is used, as with `curl`.
+  - A home directory that everyone can write to (such as `HOME=/tmp`) is not used; the private
+    folder in the temporary directory is, and the Kiro sign-in is not copied there.
+  - The connection token is checked before the server starts.
+  - Two connections at once no longer remove each other's setup lock.
+  - The Kiro sign-in and the machine settings are written through a new file with an unpredictable
+    name, and the settings are private to the user like the rest of the server's folder.
+  - The log and error messages show the download address without user name, password and query,
+    which can carry the credentials of a private mirror.
 
 ## 0.2.3 (2026-10-28)
 

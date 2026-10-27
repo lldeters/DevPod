@@ -5,7 +5,7 @@ import {
   PLATFORM_MARKER,
 } from '../../src/core/server/platform';
 import { parseServerBuildInfo } from '../../src/core/server/productInfo';
-import { expandUrlTemplate } from '../../src/core/server/template';
+import { expandUrlTemplate, urlForLog } from '../../src/core/server/template';
 
 const product = {
   commit: 'abc123',
@@ -110,5 +110,19 @@ describe('parsePlatform', () => {
   it('ships a detection script that is plain POSIX sh', () => {
     expect(detectPlatformScript).toContain(`${PLATFORM_MARKER}: start`);
     expect(detectPlatformScript).not.toMatch(/\[\[|\bbash\b/);
+  });
+});
+
+describe('urlForLog', () => {
+  it.each([
+    [
+      'https://user:secret@mirror.example:8443/a/b.tar.gz?token=x#f',
+      'https://mirror.example:8443/a/b.tar.gz',
+    ],
+    ['https://h/releases/c1/server.tar.gz', 'https://h/releases/c1/server.tar.gz'],
+    ['file:///tmp/server.tar.gz', 'file:///tmp/server.tar.gz'],
+    ['not a url', 'the configured address'],
+  ])('%s -> %s', (url, expected) => {
+    expect(urlForLog(url)).toBe(expected);
   });
 });

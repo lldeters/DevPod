@@ -43,6 +43,12 @@ describe('pod authority', () => {
       ),
     ).toThrowError(/kubeconfig path/);
     expect(() => assertPodRef({ ...ref, kubeconfig: '/home/me/\u202Egifnoc' })).toThrow();
+    // Also the Unicode line and paragraph separators, also in one file of a list.
+    for (const separator of ['\u2028', '\u2029']) {
+      expect(() =>
+        assertPodRef({ ...ref, kubeconfig: `/a/config:/tmp/k${separator}Context-prod` }, ':'),
+      ).toThrow(/kubeconfig path/);
+    }
   });
 
   it('rejects a kubeconfig on a network share, but not one in WSL', () => {

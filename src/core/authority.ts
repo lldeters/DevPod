@@ -34,11 +34,11 @@ export function isNetworkPath(candidate: string): boolean {
   return /^[\\/]{2}/.test(candidate) && !/^[\\/]{2}(wsl\$|wsl\.localhost)[\\/]/i.test(candidate);
 }
 
-// Control characters (line breaks among them) and bidirectional controls. A path from an authority
-// is shown in the confirmation dialog; with them, a link could add its own lines to that dialog or
-// make the path read differently than it is.
+// Control characters (line breaks among them), bidirectional controls and the Unicode line and
+// paragraph separators. A path from an authority is shown in the confirmation dialog; with them, a
+// link could add its own lines to that dialog or make the path read differently than it is.
 // eslint-disable-next-line no-control-regex
-const UNSAFE_CHARACTERS = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/;
+const UNSAFE_CHARACTERS = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩\u2028\u2029]/;
 
 /** Whether `value` contains a character that could disguise what a dialog shows. */
 export function hasUnsafeCharacters(value: string): boolean {

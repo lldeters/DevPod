@@ -8,6 +8,8 @@
   ignored the values from the user settings (for example `podman`) and took them from the settings
   inside the container instead. They, and `shareKiroLogin`, are read from the user settings of this
   machine only; such settings in a `devcontainer.json` are reported in the log and not applied.
+- Forwarded ports no longer cut off the end of a response when the client reads more slowly than
+  the container sends.
 
 ## 0.2.3 (2026-10-28)
 

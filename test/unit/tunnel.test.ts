@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import * as net from 'node:net';
+import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemoryLogger } from '../../src/core/logger';
 import { BRIDGE_SCRIPT } from '../../src/core/server/script';
 import { normalizeRemoteHost, openTunnel } from '../../src/core/tunnel';
-import type { OpenTunnel } from '../../src/core/tunnel';
+import type { BridgeSpawner, OpenTunnel } from '../../src/core/tunnel';
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -202,6 +204,42 @@ describe('openTunnel', () => {
     const refused = refusals();
     expect(refused.map((entry) => entry.level)).toEqual(['info', 'debug']);
     expect(refused[0]?.message).toContain(`localhost:${dead}`);
+  });
+
+  it('delivers the whole response to a slow reader when the bridge exits', async () => {
+    // A bridge that hands over its whole output at once and exits right after it, so most of the
+    // response is still buffered in the tunnel when the exit is reported.
+    const payload = Buffer.alloc(16 * 1024 * 1024, 7);
+    const bridge = (() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: () => true,
+      });
+      child.stdout.on('end', () => setImmediate(() => child.emit('close', 0, null)));
+      child.stdout.end(payload);
+      return child;
+    }) as unknown as BridgeSpawner;
+    const tunnel = await openTunnel(
+      bridge,
+      { host: 'localhost', port: 1 },
+      undefined,
+      new MemoryLogger(),
+    );
+    cleanups.push(() => tunnel.close());
+    const received = await new Promise<number>((resolve, reject) => {
+      const socket = net.connect(tunnel.local.port, '127.0.0.1');
+      let length = 0;
+      socket.on('data', (chunk: Buffer) => {
+        length += chunk.length;
+        socket.pause();
+        setTimeout(() => socket.resume(), 1);
+      });
+      socket.on('close', () => resolve(length));
+      socket.on('error', reject);
+    });
+    expect(received).toBe(payload.length);
   });
 
   it('close() stops the listener and ends open connections', async () => {

@@ -11,6 +11,13 @@ import { spawnBridge } from './bridge';
 import type { BridgeTarget } from './bridge';
 
 /**
+ * At most this many ports are forwarded at once per window: far more than projects use, and a bound
+ * on the listeners and processes a container that keeps announcing new ports can make this machine
+ * open.
+ */
+export const MAX_TUNNELS = 200;
+
+/**
  * Port forwarding for one remote window, independent of what it is connected to. The IDE asks for
  * tunnels through `factory`; ports that are configured to be forwarded are opened up front.
  */
@@ -21,7 +28,10 @@ export class TunnelHub implements vscode.Disposable {
   /** Tunnels for configured ports, replaced whenever the window is resolved again. */
   private forwards: OpenTunnel[] = [];
 
-  constructor(private readonly logger: Logger) {}
+  constructor(
+    private readonly logger: Logger,
+    private readonly limit = MAX_TUNNELS,
+  ) {}
 
   /** Sets where tunnels are relayed to; called once the remote side is reachable. */
   connect(target: BridgeTarget): void {
@@ -55,6 +65,13 @@ export class TunnelHub implements vscode.Disposable {
         `The IDE asked to forward ${remote}, but the window is not connected.`,
       );
       throw new Error('The remote window is not connected yet.');
+    }
+    if (this.tunnels.size + this.forwards.length >= this.limit) {
+      this.logger.log(
+        'warn',
+        `Not forwarding ${remote}: ${this.limit} ports are forwarded already.`,
+      );
+      throw new Error(`At most ${this.limit} ports can be forwarded at once.`);
     }
     this.logger.log('info', `The IDE asked to forward ${remote}; trying local port ${wanted}.`);
 
@@ -101,8 +118,15 @@ export class TunnelHub implements vscode.Disposable {
       return [];
     }
 
+    const allowed = ports.slice(0, Math.max(0, this.limit - this.tunnels.size));
+    if (allowed.length < ports.length) {
+      this.logger.log(
+        'warn',
+        `Forwarding ${allowed.length} of ${ports.length} configured ports: at most ${this.limit} ports are forwarded at once.`,
+      );
+    }
     const described: vscode.TunnelDescription[] = [];
-    for (const port of ports) {
+    for (const port of allowed) {
       try {
         const tunnel = await this.open(target, port, port.port);
         this.forwards.push(tunnel);

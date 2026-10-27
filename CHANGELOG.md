@@ -30,6 +30,7 @@
   an unknown placeholder.
 - On Windows, `wsl.exe`, and the Windows browser that sign-ins of kubectl in WSL open, are always
   taken from an absolute system folder, also when `SystemRoot` is empty or not an absolute path.
+- At most 200 ports are forwarded at once per window; further requests are refused and logged.
 
 ## 0.2.3 (2026-10-28)
 

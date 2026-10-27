@@ -55,7 +55,9 @@ or by publishing a release in the GitHub UI.
 5. Watch the _Release_ workflow in the _Actions_ tab. It checks tag, version and changelog, runs the
    whole CI including the Docker and Kubernetes end-to-end tests, publishes the VSIX that CI built
    to Open VSX, and attaches that VSIX to the GitHub release (which it creates, with the changelog
-   section as notes, when the tag came from the command line).
+   section as notes, when the tag came from the command line). In that run the VSIX is the artifact
+   `devcontainers-kiro-vsix-release`, a name no branch or pull request build uses; those upload
+   `devcontainers-kiro-vsix`, which is for testing only and is never published.
    The listing is then at <https://open-vsx.org/extension/lldeters/devcontainers-kiro>.
 
 If the check of tag, version and changelog or CI fails, nothing was published: delete the tag (and a

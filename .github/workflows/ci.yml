@@ -6,6 +6,11 @@ on:
   pull_request:
   # The release workflow runs the whole CI, end-to-end tests included, before it publishes.
   workflow_call:
+    inputs:
+      artifact:
+        description: Name of the VSIX artifact. The release gives its own, used by no other run.
+        type: string
+        default: devcontainers-kiro-vsix
 
 permissions:
   contents: read
@@ -36,9 +41,11 @@ jobs:
         run: npm run test:smoke
       - name: Package VSIX
         run: npx vsce package --out devcontainers-kiro.vsix
+      # Branch and pull request builds (forks included) upload devcontainers-kiro-vsix; only a release
+      # run uploads the name its publish job takes, so a build of unreviewed code never carries it.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: devcontainers-kiro-vsix
+          name: ${{ inputs.artifact || 'devcontainers-kiro-vsix' }}
           path: devcontainers-kiro.vsix
 
   e2e:

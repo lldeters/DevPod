@@ -4,14 +4,14 @@ Open-source [dev container](https://containers.dev) support for the [Kiro](https
 reopen a folder inside a container, with the IDE server, terminal, extensions and language
 tooling running in it.
 
-> **Status: experimental (0.1.0), real-world tested.**
+> **Status: experimental (0.2.0), real-world tested.**
 > Verified in Kiro 1.4.26 (VS Code 1.131) on Windows with Docker Desktop (Docker 29.2.0):
 > _Reopen in Container_, terminal and file editing in the container, installing extensions, a Kiro
 > agent session, _Rebuild Container_, _Reopen Folder Locally_, reconnecting to a running container,
 > extensions and settings from `customizations.vscode`, port forwarding (configured and
 > automatically detected), the Kiro sign-in inside the container, copying the sign-in after the
-> question, attaching to a pod of Docker Desktop's Kubernetes, and the confirmation of windows the
-> extension did not open itself.
+> question, attaching to a pod of Docker Desktop's Kubernetes, attaching with kubectl in WSL (a
+> k3s cluster in Ubuntu 24.04), and the confirmation of windows the extension did not open itself.
 > **Not yet verified in Kiro:** macOS and Linux hosts, Podman, Docker Compose and Dockerfile based
 > configurations, sub folders of Git repositories, several configurations in one folder, and other
 > clusters than Docker Desktop's (these are covered by automated tests only, including a real kind
@@ -22,7 +22,7 @@ it is a clean-room implementation: it contains no code from Microsoft's propriet
 Containers" extension. It builds on the public specification and the open-source
 [Dev Container CLI](https://github.com/devcontainers/cli). See [NOTICE](NOTICE).
 
-## Features (0.1.0)
+## Features (0.2.0)
 
 - Detects dev container configurations (`.devcontainer/devcontainer.json`, `.devcontainer.json`,
   `.devcontainer/<name>/devcontainer.json`) and lets you pick one.
@@ -41,8 +41,8 @@ Containers" extension. It builds on the public specification and the open-source
 - **Attach to Kiro for Kubernetes pods:** right-click a pod in the Kubernetes extension's explorer
   and choose **Attach to Kiro**, or run **Attach to Running Kubernetes Container...** from the
   command palette (it works without the Kubernetes extension, too). A new window opens whose files,
-  terminal, extensions and ports live in a container of that pod. See
-  [Kubernetes pods](#kubernetes-pods).
+  terminal, extensions and ports live in a container of that pod. On Windows, kubectl can run
+  inside WSL. See [Kubernetes pods](#kubernetes-pods).
 - Docker and Podman.
 - No telemetry.
 

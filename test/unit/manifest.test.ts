@@ -83,8 +83,29 @@ describe('manifest', () => {
 
   it('declares the settings the Kubernetes feature reads', () => {
     expect(Object.keys(manifest.contributes.configuration.properties)).toEqual(
-      expect.arrayContaining(['dev.containers.kubectlPath', 'dev.containers.kubeconfigPath']),
+      expect.arrayContaining([
+        'dev.containers.kubectlPath',
+        'dev.containers.kubeconfigPath',
+        'dev.containers.kubectlInWSL',
+        'dev.containers.kubectlWSLDistro',
+      ]),
     );
+  });
+
+  it('lets only the user decide where kubectl runs, never a workspace', () => {
+    const properties = manifest.contributes.configuration.properties;
+    for (const key of [
+      'dev.containers.kubectlPath',
+      'dev.containers.kubeconfigPath',
+      'dev.containers.kubectlInWSL',
+      'dev.containers.kubectlWSLDistro',
+    ]) {
+      expect(properties[key], key).toMatchObject({ scope: 'machine' });
+    }
+    expect(properties['dev.containers.kubectlInWSL']).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
   });
 });
 

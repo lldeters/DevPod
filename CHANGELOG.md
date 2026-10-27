@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **kubectl in WSL** (Windows): `dev.containers.kubectlInWSL` and `dev.containers.kubectlWSLDistro`
+  run kubectl, its credential plugins and kubeconfig inside a WSL distribution, for listing,
+  attaching, the connection and port forwarding. The Kubernetes extension's `vs-kubernetes.use-wsl`
+  turns it on when the setting is not set. A pod window keeps the WSL distribution it was attached
+  with. ([#7](https://github.com/lldeters/DevPod/issues/7))
+- A `.cmd` or `.bat` file as `dev.containers.kubectlPath` gets a message that explains why it cannot
+  be started, instead of "Install kubectl".
+
 ## 0.1.0 (2026-10-25)
 
 First public, experimental version.

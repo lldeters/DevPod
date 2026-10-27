@@ -132,10 +132,10 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       const resolver = new PodResolver({
         logger,
         kubectl: new Kubectl(
-          () => stub.path,
-          () => undefined,
+          () => ({ kubectl: stub.path }),
+          () => ({}),
         ),
-        kubectlPath: () => stub.path,
+        kubectlLauncher: () => ({ kubectl: stub.path }),
         targets: allKnown,
         serverBuild: async () => build,
         serverUrlTemplate: () => `file://${archive}`,
@@ -363,10 +363,10 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       const resolver = new PodResolver({
         logger,
         kubectl: new Kubectl(
-          () => stub.path,
-          () => undefined,
+          () => ({ kubectl: stub.path }),
+          () => ({}),
         ),
-        kubectlPath: () => stub.path,
+        kubectlLauncher: () => ({ kubectl: stub.path }),
         targets: new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento),
         serverBuild: async () => build,
         serverUrlTemplate: () => `file://${archive}`,
@@ -379,6 +379,37 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       expect(state.warnings[0]?.message).toBe('Attach to the pod dev/mypod?');
       expect(state.warnings[0]?.detail).toContain('kubeconfig: /home/someone/Downloads/config');
       expect(await stub.calls()).toEqual([]);
+    });
+
+    it('names the WSL distribution when asking, and runs every kubectl call there', async () => {
+      const logger = new MemoryLogger();
+      const launched: unknown[] = [];
+      const launcher = (wsl: unknown) => {
+        launched.push(wsl);
+        return { kubectl: stub.path }; // the stub stands in for kubectl in WSL
+      };
+      const resolver = new PodResolver({
+        logger,
+        kubectl: new Kubectl(launcher, () => ({})),
+        kubectlLauncher: launcher,
+        targets: new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento),
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const wsl = { distro: 'Ubuntu-24.04' };
+      const linked = encodePodAuthority({ ...ref, wsl });
+
+      await expect(resolver.resolve(linked)).rejects.toMatchObject({ kind: 'NotAvailable' });
+      expect(state.warnings[0]?.detail).toContain('WSL distribution: Ubuntu-24.04');
+      expect(state.warnings[0]?.detail).toContain('This runs kubectl in WSL (Ubuntu-24.04)');
+      expect(launched).toEqual([]);
+
+      state.answerWarning = () => 'Open';
+      await resolver.resolve(linked);
+      expect(launched.length).toBeGreaterThanOrEqual(3); // pod query, exec target, provisioning
+      expect(launched.every((mode) => JSON.stringify(mode) === JSON.stringify(wsl))).toBe(true);
     });
 
     it('rejects an invalid authority without calling kubectl', async () => {
@@ -394,10 +425,10 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       const resolver = new PodResolver({
         logger,
         kubectl: new Kubectl(
-          () => path.join(root, 'no-such-kubectl'),
-          () => undefined,
+          () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
+          () => ({}),
         ),
-        kubectlPath: () => path.join(root, 'no-such-kubectl'),
+        kubectlLauncher: () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
         targets: allKnown,
         serverBuild: async () => build,
         serverUrlTemplate: () => undefined,

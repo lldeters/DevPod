@@ -6,6 +6,8 @@ import { errorMessage } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
 import { KubectlExecutor, KubectlTarget } from '../core/k8s/kubectl';
 import type { Kubectl } from '../core/k8s/kubectl';
+import { describeWsl } from '../core/k8s/launcher';
+import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { decodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
 import type { ServerBuildInfo } from '../core/server/productInfo';
@@ -20,8 +22,8 @@ export interface PodResolverDependencies {
   logger: Logger;
   /** Read-only queries (is the pod there and running?). */
   kubectl: Kubectl;
-  /** Path of the kubectl binary used for `exec`; read for every connection. */
-  kubectlPath: () => string;
+  /** How kubectl is started for `exec`, directly or in the window's WSL distribution; read for every connection. */
+  kubectlLauncher: (wsl: WslSelection | undefined) => KubectlLauncher;
   /** Authorities opened by this extension; any other one is confirmed before it is used. */
   targets: Pick<KnownTargets, 'has' | 'add'>;
   serverBuild: () => Promise<ServerBuildInfo>;
@@ -80,7 +82,7 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
       'info',
       `Attaching to ${ref.namespace}/${ref.pod} (container ${ref.container}${
         ref.context ? `, context ${ref.context}` : ''
-      })`,
+      }${ref.wsl ? `, kubectl ${describeWsl(ref.wsl)}` : ''})`,
     );
     // Before kubectl runs: the kubeconfig decides which cluster is contacted, and it can run commands.
     await confirmTarget(
@@ -89,17 +91,14 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
       `Attach to the pod ${ref.namespace}/${ref.pod}?`,
       `Pod: ${ref.namespace}/${ref.pod}\nContainer: ${ref.container}\n` +
         `Context: ${ref.context ?? 'the current one'}\n` +
-        `kubeconfig: ${ref.kubeconfig ?? "kubectl's default"}\n\n` +
-        'This runs kubectl with that kubeconfig and installs the IDE server in the container.',
+        `kubeconfig: ${ref.kubeconfig ?? "kubectl's default"}\n` +
+        (ref.wsl ? `WSL distribution: ${ref.wsl.distro ?? 'the default one'}\n` : '') +
+        `\nThis runs kubectl${ref.wsl ? ` ${describeWsl(ref.wsl)}` : ''} with that kubeconfig ` +
+        'and installs the IDE server in the container.',
     );
 
     const build = await this.deps.serverBuild();
-    const pod = await kubectl.pod({
-      namespace: ref.namespace,
-      pod: ref.pod,
-      ...(ref.context === undefined ? {} : { context: ref.context }),
-      ...(ref.kubeconfig === undefined ? {} : { kubeconfig: ref.kubeconfig }),
-    });
+    const pod = await kubectl.pod(ref);
     checkContainerRunning(pod, ref.container);
 
     return vscode.window.withProgress(
@@ -113,9 +112,9 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
         token.onCancellationRequested(() => abort.abort());
 
         progress.report({ message: 'Setting up the IDE server in the pod…' });
-        const target = new KubectlTarget(this.deps.kubectlPath(), ref);
+        const target = new KubectlTarget(this.deps.kubectlLauncher(ref.wsl), ref);
         const server = await provisionServer(
-          new KubectlExecutor(this.deps.kubectlPath, ref),
+          new KubectlExecutor(() => this.deps.kubectlLauncher(ref.wsl), ref),
           {
             containerId: target.label,
             build,

@@ -15,6 +15,7 @@ export interface Settings {
   serverDownloadUrlTemplate: string | undefined;
   kubectlPath: string | undefined;
   kubeconfigPath: string | undefined;
+  kubectlWSLDistro: string | undefined;
   shareKiroLogin: ShareKiroLogin;
 }
 
@@ -41,6 +42,7 @@ export function readSettings(): Settings {
     serverDownloadUrlTemplate: nonEmpty(config.get<string>('serverDownloadUrlTemplate')),
     kubectlPath: nonEmpty(config.get<string>('kubectlPath')),
     kubeconfigPath: nonEmpty(config.get<string>('kubeconfigPath')),
+    kubectlWSLDistro: nonEmpty(config.get<string>('kubectlWSLDistro')),
     shareKiroLogin: shareKiroLogin(config.get<unknown>('shareKiroLogin')),
   };
 }

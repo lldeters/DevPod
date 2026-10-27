@@ -222,6 +222,18 @@
           "scope": "machine",
           "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods. Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
         },
+        "dev.containers.kubectlInWSL": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Windows only: run `kubectl` inside WSL to attach to Kubernetes pods, for kubectl, credential plugins and kubeconfigs that exist only there. `#dev.containers.kubectlPath#` is then a Linux path (empty: `kubectl` from the login shell's `PATH`), and `~` in `#dev.containers.kubeconfigPath#` is the Linux home directory. When this is not set, the Kubernetes extension's `vs-kubernetes.use-wsl` decides."
+        },
+        "dev.containers.kubectlWSLDistro": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The WSL distribution that runs `kubectl` with `#dev.containers.kubectlInWSL#`. Leave empty for the default distribution."
+        },
         "dev.containers.shareKiroLogin": {
           "type": "string",
           "enum": [
@@ -254,7 +266,8 @@
     "vscode:prepublish": "npm run build -- --production",
     "test:e2e": "vitest run test/e2e",
     "test:smoke": "node scripts/smoke-bundle.mjs",
-    "test:e2e:k8s": "vitest run test/e2e/pod.test.ts"
+    "test:e2e:k8s": "vitest run test/e2e/pod.test.ts",
+    "test:e2e:wsl": "vitest run test/e2e/wsl.test.ts"
   },
   "dependencies": {
     "@devcontainers/cli": "0.89.0",

@@ -99,6 +99,8 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | `dev.containers.serverDownloadUrlTemplate` | empty    | Where to download the IDE server (see above).                             |
 | `dev.containers.kubectlPath`               | empty    | `kubectl` for pods; else the Kubernetes extension's, else `PATH`.         |
 | `dev.containers.kubeconfigPath`            | empty    | kubeconfig for pods; else the Kubernetes extension's, else kubectl's own. |
+| `dev.containers.kubectlInWSL`              | `false`  | Windows: run kubectl inside WSL (see [kubectl in WSL](#kubectl-in-wsl)).  |
+| `dev.containers.kubectlWSLDistro`          | empty    | The WSL distribution for that; empty means the default one.               |
 | `dev.containers.shareKiroLogin`            | `ask`    | Copy this machine's Kiro sign-in into containers and pods (see below).    |
 
 ## Kubernetes pods
@@ -126,6 +128,30 @@ settings are honored (workspace values are not), or set `dev.containers.kubectlP
 
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.
+
+### kubectl in WSL
+
+On Windows, kubectl, credential plugins (for example `kubectl oidc-login`) and kubeconfigs are
+often set up only inside WSL. With `dev.containers.kubectlInWSL` (and optionally
+`dev.containers.kubectlWSLDistro`), the extension runs kubectl in that distribution for listing,
+attaching, the connection and port forwarding. If you leave the setting unset, the Kubernetes
+extension's `vs-kubernetes.use-wsl` decides, so _Attach to Kiro_ uses the same kubectl as its
+explorer.
+
+- `kubectl` is found through the `PATH` of your login shell, which is read from the login profile
+  (`~/.profile`, `~/.bash_profile` or `~/.zprofile`), **not** from `~/.bashrc`. The same goes for
+  `KUBECONFIG`. Put the lines that add kubectl or krew (`~/.krew/bin`) to `PATH` there, or set
+  `dev.containers.kubectlPath` to the Linux path of kubectl. A Windows path is refused in this mode.
+- `dev.containers.kubeconfigPath` may be a Linux path, `~/...` (the Linux home directory) or a
+  Windows path such as `C:\Users\me\.kube\config`, which is converted with `wslpath`.
+- A window that was attached this way keeps running kubectl in that distribution, even if the
+  settings change later.
+- Sign-ins that open a browser (OIDC) need a way to open one from WSL, for example `wslu`. kubectl's
+  output is not shown while it waits for the sign-in.
+
+Without this setting, `dev.containers.kubectlPath` must be a program Windows can start directly,
+such as `kubectl.exe`: a `.cmd` or `.bat` wrapper cannot be used, because kubectl is started
+without a shell.
 
 ## Signing in to Kiro inside a container
 

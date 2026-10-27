@@ -9,6 +9,7 @@
 | `npm run test:smoke`       | Node, git, a build                                    | Loads the **built** `dist/extension.js` with a stand-in `vscode`, runs _Reopen in Container_ with the bundled CLI          |
 | `npm run test:e2e:k8s`     | kubectl, a throw-away cluster (kind), `DCK_E2E_K8S=1` | Real pod: attach picker queries, readiness checks, server install through `kubectl exec`, reuse, port relay out of the pod |
 | `npm run test:e2e`         | Docker, `DCK_E2E=1`                                   | Real container: `up`, lifecycle command, idempotence, server install and reuse, byte-exact bridge                          |
+| `npm run test:e2e:wsl`     | Windows, WSL, `DCK_E2E_WSL=1` (`DCK_WSL_DISTRO`)      | kubectl in WSL: arguments through `wsl.exe` unchanged, byte-exact stdio, `~` and `wslpath`, login `PATH`, error messages   |
 
 CI runs all of them (`.github/workflows/ci.yml`).
 
@@ -98,6 +99,21 @@ Use `docs/ANLEITUNG-KIRO-TEST.md`, step 11, which has a ready-made pod.
 - [ ] A pod without a writable home directory still works (server in
       `/tmp/devcontainers-kiro-<uid>`), including installing an extension there.
 - [ ] A pod that is not running, or a missing `kubectl`, gives a clear message.
+
+### 7b. kubectl in WSL (Windows)
+
+With kubectl installed only inside WSL and `dev.containers.kubectlInWSL` set to `true`:
+
+- [ ] **Attach to Running Kubernetes Container...** lists contexts, namespaces and pods from WSL's
+      kubectl and kubeconfig, and attaching works (terminal, extension install, port forwarding).
+- [ ] **Attach to Kiro** in the Kubernetes explorer works when that extension uses
+      `vs-kubernetes.use-wsl` and `dev.containers.kubectlInWSL` is not set.
+- [ ] A kubeconfig with an exec credential plugin from `~/.krew/bin` (added to `PATH` in
+      `~/.profile`) works.
+- [ ] With `dev.containers.kubectlWSLDistro` set to a distribution that does not exist, the
+      message names it in readable text.
+- [ ] Turning the setting off and reloading a window that was attached in WSL still connects
+      through WSL.
 
 ### 8. Windows not opened by the extension
 

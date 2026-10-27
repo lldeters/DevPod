@@ -40,7 +40,7 @@ or by publishing a release in the GitHub UI.
 
 ## Every release
 
-1. Set the version (it is `0.1.0` for the first release already):
+1. Set the version:
    `npm version <x.y.z> --no-git-tag-version` (updates `package.json` and `package-lock.json`).
 2. In [CHANGELOG.md](../CHANGELOG.md), give the version a dated heading: `## <x.y.z> (YYYY-MM-DD)`.
    The workflow refuses to publish without it.

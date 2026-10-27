@@ -2,7 +2,7 @@
   "name": "devcontainers-kiro",
   "displayName": "Dev Containers for Kiro (Community)",
   "description": "Unofficial, open-source Dev Containers support for the Kiro IDE. Not affiliated with Microsoft or Amazon.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "lldeters",
   "license": "Apache-2.0",
   "icon": "media/icon.png",

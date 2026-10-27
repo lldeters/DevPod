@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-27)
 
 - **kubectl in WSL** (Windows): `dev.containers.kubectlInWSL` and `dev.containers.kubectlWSLDistro`
   run kubectl, its credential plugins and kubeconfig inside a WSL distribution, for listing,
@@ -9,6 +9,8 @@
   with. ([#7](https://github.com/lldeters/DevPod/issues/7))
 - A `.cmd` or `.bat` file as `dev.containers.kubectlPath` gets a message that explains why it cannot
   be started, instead of "Install kubectl".
+- Verified in Kiro 1.4.26 on Windows: attaching to a pod of a k3s cluster in WSL (Ubuntu 24.04)
+  with kubectl in WSL.
 
 ## 0.1.0 (2026-10-25)
 

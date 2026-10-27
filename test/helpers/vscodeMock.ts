@@ -9,6 +9,8 @@ export const state = {
   workspaceFolders: undefined as { uri: Uri; name: string; index: number }[] | undefined,
   /** User settings. */
   settings: {} as Record<string, unknown>,
+  /** User settings of the remote side in a remote window; they win over `settings`, as in the IDE. */
+  remoteSettings: {} as Record<string, unknown>,
   /** Workspace settings; they win over user settings in `get`, as in the IDE. */
   workspaceSettings: {} as Record<string, unknown>,
   registeredCommands: new Map<string, Handler>(),
@@ -40,6 +42,7 @@ export const state = {
 export function reset(): void {
   state.workspaceFolders = undefined;
   state.settings = {};
+  state.remoteSettings = {};
   state.workspaceSettings = {};
   state.registeredCommands.clear();
   state.executed = [];
@@ -207,12 +210,17 @@ export const workspace = {
   },
   getConfiguration: (section?: string) => {
     const full = (key: string): string => (section ? `${section}.${key}` : key);
+    const user = (key: string): unknown =>
+      state.remoteSettings[full(key)] ?? state.settings[full(key)];
     return {
       get: <T>(key: string): T | undefined =>
-        (state.workspaceSettings[full(key)] ?? state.settings[full(key)]) as T | undefined,
+        (state.workspaceSettings[full(key)] ?? user(key)) as T | undefined,
+      // Like the IDE at runtime: `globalValue` merges this machine's and the remote side's settings.
       inspect: <T>(key: string) => ({
         key: full(key),
-        globalValue: state.settings[full(key)] as T | undefined,
+        globalValue: user(key) as T | undefined,
+        globalLocalValue: state.settings[full(key)] as T | undefined,
+        globalRemoteValue: state.remoteSettings[full(key)] as T | undefined,
         workspaceValue: state.workspaceSettings[full(key)] as T | undefined,
       }),
       update: async (key: string, value: unknown): Promise<void> => {

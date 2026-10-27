@@ -12,7 +12,7 @@ import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { encodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
 import type { KnownTargets } from '../remote/knownTargets';
-import { readSettings } from './settings';
+import { readSettings, userValue } from './settings';
 
 /** What a right-click in the Kubernetes explorer pointed at. */
 export type ExplorerTarget =
@@ -48,15 +48,6 @@ function nonEmpty(value: unknown): string | undefined {
 /** `~/...` as a shell would read it; kubectl is started without a shell, so nothing else does. */
 export function expandHome(file: string): string {
   return file === '~' || /^~[\\/]/.test(file) ? path.join(homedir(), file.slice(1)) : file;
-}
-
-/**
- * A setting of the Kubernetes extension as the user set it. Those settings can also come from a
- * workspace, but a program to run, or a kubeconfig (which decides the server and can run commands),
- * must not: this extension's own path settings have scope `machine` for the same reason.
- */
-function userValue<T>(section: string | undefined, key: string): T | undefined {
-  return vscode.workspace.getConfiguration(section).inspect<T>(key)?.globalValue;
 }
 
 /**

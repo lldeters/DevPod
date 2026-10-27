@@ -89,6 +89,7 @@ describe('extractCustomizations', () => {
       extensions: [],
       settings: {},
       rejectedExtensions: [],
+      ignoredSettings: [],
     });
   });
 
@@ -96,6 +97,25 @@ describe('extractCustomizations', () => {
     expect(
       extractCustomizations({ customizations: { vscode: { settings: ['x'] } } }).settings,
     ).toEqual({});
+  });
+
+  it("reports this extension's settings instead of writing them into the container", () => {
+    const result = extractCustomizations({
+      customizations: {
+        vscode: {
+          settings: {
+            'editor.tabSize': 2,
+            'dev.containers.dockerPath': '/x/docker',
+            'dev.containers': { kubectlPath: '/x/kubectl' },
+            dev: { containers: { devcontainerCliPath: '/x/cli.js' } },
+            'dev.containersExtra': true,
+          },
+        },
+        kiro: { settings: { 'dev.containers.dockerPath': '/y/docker' } },
+      },
+    });
+    expect(result.settings).toEqual({ 'editor.tabSize': 2, 'dev.containersExtra': true });
+    expect(result.ignoredSettings).toEqual(['dev.containers.dockerPath', 'dev.containers', 'dev']);
   });
 });
 

@@ -95,7 +95,10 @@ export async function openTunnel(
         );
         refusalReported = true;
       }
-      finish();
+      // The relay has ended. The socket still sends what it has buffered and is cleaned up by its
+      // own 'close'; destroying it now would cut off the end of a response to a slow reader.
+      children.delete(child);
+      socket.end();
     });
     socket.pipe(child.stdin);
     child.stdout.pipe(socket);

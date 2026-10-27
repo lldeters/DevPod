@@ -12,6 +12,8 @@
   the container sends.
 - Error messages and progress notifications no longer turn `[text](link)` in the output of a
   container, a pod, kubectl or the Dev Container CLI into a clickable link.
+- The log masks the values of more variables that usually hold secrets (names with `passphrase`,
+  `cookie`, `session`, `jwt`, `bearer`, or ending in `key` or `pat`).
 
 ## 0.2.0 (2026-10-27)
 

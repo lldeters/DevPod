@@ -7,12 +7,11 @@ export interface TemplateVariables {
   commit: string;
   quality: string;
   version: string;
-  release: string;
   os: string;
   arch: string;
 }
 
-const KNOWN = new Set<string>(['commit', 'quality', 'version', 'release', 'os', 'arch']);
+const KNOWN = new Set<string>(['commit', 'quality', 'version', 'os', 'arch']);
 
 /**
  * Expands `${name}` placeholders. Unknown or empty placeholders are an error rather than being

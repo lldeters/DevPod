@@ -225,7 +225,6 @@ export async function provisionServer(
     commit: input.build.commit,
     quality: input.build.quality,
     version: input.build.version,
-    release: '',
     os: platform.os,
     arch: platform.arch,
   });

@@ -25,6 +25,9 @@
     name, and the settings are private to the user like the rest of the server's folder.
   - The log and error messages show the download address without user name, password and query,
     which can carry the credentials of a private mirror.
+- `${release}` is no longer listed as a placeholder of `dev.containers.serverDownloadUrlTemplate`:
+  no IDE build provides a value for it, so a template with it always failed. It is now reported as
+  an unknown placeholder.
 
 ## 0.2.3 (2026-10-28)
 

@@ -13,7 +13,7 @@ import { resolveAndValidateConfig } from '../core/config/validate';
 import type { DevContainerCli } from '../core/cli/devcontainerCli';
 import type { CliLogEvent } from '../core/cli/output';
 import type { ContainerEngine } from '../core/engine/containerEngine';
-import { errorMessage } from '../core/errors';
+import { errorMessage, notificationText } from '../core/errors';
 import type { Logger } from '../core/logger';
 import type { ServerBuildInfo } from '../core/server/productInfo';
 import { provisionServer } from '../core/server/provisioner';
@@ -46,7 +46,7 @@ function progressText(event: CliLogEvent): string | undefined {
   if (text === '') {
     return undefined;
   }
-  return text.length > 90 ? `${text.slice(0, 87)}…` : text;
+  return notificationText(text.length > 90 ? `${text.slice(0, 87)}…` : text);
 }
 
 /**
@@ -67,7 +67,11 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
       return await this.start(authority);
     } catch (error) {
       this.deps.logger.log('error', `Could not open the dev container: ${errorMessage(error)}`);
-      throw vscode.RemoteAuthorityResolverError.NotAvailable(errorMessage(error), false);
+      // The IDE shows the message in a notification.
+      throw vscode.RemoteAuthorityResolverError.NotAvailable(
+        notificationText(errorMessage(error)),
+        false,
+      );
     }
   }
 

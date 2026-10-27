@@ -341,6 +341,14 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       expect((await stub.calls()).some((args) => args.includes('exec'))).toBe(false);
     });
 
+    it('shows no link that the cluster put into an error message', async () => {
+      await stub.set('pod.json', podJson({ name: 'mypod [Retry](command:x.y)', phase: 'Pending' }));
+      const { resolver } = createResolver();
+      const error: unknown = await resolver.resolve(encodePodAuthority(ref)).catch((e) => e);
+      expect(error).toMatchObject({ kind: 'NotAvailable' });
+      expect((error as Error).message).toContain('mypod [Retry] (command:x.y) is not running');
+    });
+
     it('names the containers when the chosen one does not exist', async () => {
       await stub.set('pod.json', podJson({ containers: [{ name: 'web', running: true }] }));
       const { resolver } = createResolver();

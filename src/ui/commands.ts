@@ -9,7 +9,7 @@ import type { Kubectl } from '../core/k8s/kubectl';
 import { discoverConfigs } from '../core/config/discovery';
 import { resolveAndValidateConfig } from '../core/config/validate';
 import type { DiscoveredConfig } from '../core/config/discovery';
-import { errorMessage } from '../core/errors';
+import { errorMessage, notificationText } from '../core/errors';
 import type { KnownTargets } from '../remote/knownTargets';
 import type { RebuildRequests } from '../remote/rebuildRequests';
 import { showDiagnostics } from './diagnostics';
@@ -84,7 +84,10 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
       } catch (error) {
         logger.log('error', errorMessage(error));
         const open = 'Show Log';
-        const choice = await vscode.window.showErrorMessage(errorMessage(error), open);
+        const choice = await vscode.window.showErrorMessage(
+          notificationText(errorMessage(error)),
+          open,
+        );
         if (choice === open) {
           logger.show();
         }

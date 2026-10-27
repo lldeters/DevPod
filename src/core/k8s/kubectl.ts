@@ -113,6 +113,9 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/** The phases of a pod; anything else the cluster reports is taken as `Unknown`. */
+const POD_PHASES = new Set(['Pending', 'Running', 'Succeeded', 'Failed', 'Unknown']);
+
 /** Reads the parts of `kubectl get pod -o json` that attaching needs. */
 export function parsePodInfo(json: string): PodInfo {
   let document: unknown;
@@ -153,10 +156,11 @@ export function parsePodInfo(json: string): PodInfo {
     throw new DevContainerError('CLI_BAD_OUTPUT', 'kubectl returned no valid pod description.');
   }
   const preferred = asRecord(metadata['annotations'])['kubectl.kubernetes.io/default-container'];
+  const phase = status['phase'];
   return {
     name,
     namespace: typeof metadata['namespace'] === 'string' ? metadata['namespace'] : '',
-    phase: typeof status['phase'] === 'string' ? status['phase'] : 'Unknown',
+    phase: typeof phase === 'string' && POD_PHASES.has(phase) ? phase : 'Unknown',
     containers,
     ...(typeof preferred === 'string' ? { defaultContainer: preferred } : {}),
   };

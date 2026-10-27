@@ -4,7 +4,7 @@
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { DevContainerError, errorMessage } from '../core/errors';
+import { DevContainerError, errorMessage, notificationText } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
 import { noContextError, noCurrentContextError } from '../core/k8s/kubectl';
 import type { Kubectl, KubectlScope, PodInfo } from '../core/k8s/kubectl';
@@ -242,7 +242,9 @@ async function chooseInteractively(
 
   const pods = await deps.kubectl.pods(context, namespace);
   if (pods.length === 0) {
-    void vscode.window.showInformationMessage(`There are no pods in namespace "${namespace}".`);
+    void vscode.window.showInformationMessage(
+      notificationText(`There are no pods in namespace "${namespace}".`),
+    );
     return undefined;
   }
   const pod = await pick(
@@ -320,7 +322,10 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
   // The kubeconfig and WSL mode the pod was listed with; the window keeps them.
   const scope = deps.kubectl.scope();
   const pod = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Reading pod ${podName}` },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: notificationText(`Reading pod ${podName}`),
+    },
     () =>
       deps.kubectl.pod({
         namespace,

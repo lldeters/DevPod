@@ -21,7 +21,7 @@ import {
 } from './machineSettings';
 import { buildInstallScript, parseInstallResult } from './script';
 import type { InstallResult } from './script';
-import { expandUrlTemplate } from './template';
+import { expandUrlTemplate, urlForLog } from './template';
 
 /** The part of ContainerEngine that provisioning needs; lets tests inject a fake. */
 export interface ServerExecutor {
@@ -146,7 +146,8 @@ async function syncMachineSettings(
 const LOGIN_MESSAGES = {
   copied: 'Copied the Kiro sign-in of this machine into the container.',
   exists: 'The container already has a Kiro sign-in; it was left unchanged.',
-  nohome: 'The container user has no writable home directory, so the Kiro sign-in was not copied.',
+  nohome:
+    'The container user has no private, writable home directory, so the Kiro sign-in was not copied.',
   declined: 'The Kiro sign-in was not copied into the container (not confirmed).',
 };
 
@@ -228,7 +229,7 @@ export async function provisionServer(
     os: platform.os,
     arch: platform.arch,
   });
-  logger.log('info', `Installing the IDE server from ${downloadUrl}`);
+  logger.log('info', `Installing the IDE server from ${urlForLog(downloadUrl)}`);
 
   const output = await runShell(
     executor,

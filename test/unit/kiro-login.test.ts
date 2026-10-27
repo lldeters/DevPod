@@ -1,13 +1,25 @@
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DevContainerError } from '../../src/core/errors';
 import {
   KIRO_LOGIN_RELATIVE_PATH,
+  buildLoginStatusScript,
   buildShareLoginScript,
   checkLoginFile,
+  parseLoginStatus,
   parseShareLoginResult,
   readLocalLoginFile,
 } from '../../src/core/server/kiroLogin';
@@ -152,6 +164,30 @@ describe('buildShareLoginScript (run with sh)', () => {
     }
     await chmod(readOnly, 0o700);
     await expect(stat(target())).rejects.toThrow();
+  });
+
+  it('writes nothing into a home directory that everyone can write to, such as /tmp', async () => {
+    const shared = path.join(home, 'shared');
+    await mkdir(shared);
+    await chmod(shared, 0o1777);
+    expect(parseShareLoginResult(run(buildShareLoginScript(SECRET), { HOME: shared }).stdout)).toBe(
+      'nohome',
+    );
+    expect(parseLoginStatus(run(buildLoginStatusScript(), { HOME: shared }).stdout)).toBe('nohome');
+    await expect(stat(path.join(shared, '.aws'))).rejects.toThrow();
+  });
+
+  it('does not write through a file or link that is already at a temporary name', async () => {
+    await mkdir(path.dirname(target()), { recursive: true });
+    const elsewhere = path.join(home, 'elsewhere');
+    await symlink(elsewhere, `${target()}.tmp`);
+    expect(parseShareLoginResult(run(buildShareLoginScript(SECRET)).stdout)).toBe('copied');
+    expect((await readFile(target(), 'utf8')).trim()).toBe(SECRET);
+    await expect(stat(elsewhere)).rejects.toThrow();
+    // nothing but the planted link and the sign-in itself is left in the folder
+    expect((await readdir(path.dirname(target()))).sort()).toEqual(
+      ['kiro-auth-token.json', 'kiro-auth-token.json.tmp'].sort(),
+    );
   });
 
   it('copies content that looks like shell code byte for byte, without running it', async () => {

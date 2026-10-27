@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -342,5 +342,137 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
     const result = await run(buildInstallScript({ ...options(), applicationName: 'other-name' }));
     expect(result.code).not.toBe(0);
     expect(() => parseInstallResult(result.stdout)).toThrowError(/launcher/);
+  });
+
+  // What the scripts need from PATH, so a test can leave a program out (curl, to use wget).
+  const TOOLS = [
+    'cat',
+    'chmod',
+    'cp',
+    'dirname',
+    'gzip',
+    'head',
+    'id',
+    'mkdir',
+    'mktemp',
+    'mv',
+    'nohup',
+    'od',
+    'rm',
+    'sed',
+    'setsid',
+    'sleep',
+    'stat',
+    'tail',
+    'tar',
+    'touch',
+    'tr',
+  ];
+  /** A folder for PATH with just `tools` (where installed) and the stand-ins in `stubs`. */
+  const toolbox = async (
+    tools: readonly string[],
+    stubs: Record<string, string> = {},
+  ): Promise<string> => {
+    const dir = await mkdtemp(path.join(work, 'toolbox-'));
+    for (const tool of tools) {
+      const found = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' });
+      if (found.status === 0) await symlink(found.stdout.trim(), path.join(dir, tool));
+    }
+    for (const [name, script] of Object.entries(stubs)) {
+      await writeFile(path.join(dir, name), script);
+      await chmod(path.join(dir, name), 0o755);
+    }
+    return dir;
+  };
+
+  describe('with wget instead of curl', () => {
+    // Copies $WGET_SOURCE to the -O file and reports $WGET_HEADERS as the server's responses.
+    const wget = `#!/bin/sh
+out=''
+while [ $# -gt 0 ]; do case "$1" in -O) out="$2"; shift 2 ;; *) shift ;; esac; done
+printf '%s\\n' "$WGET_HEADERS" >&2
+cp "$WGET_SOURCE" "$out"
+`;
+    const install = async (headers: string) =>
+      runProcess('/bin/sh', ['-s'], {
+        stdin: buildInstallScript({ ...options(), downloadUrl: 'https://example.invalid/s.tgz' }),
+        env: {
+          PATH: await toolbox(TOOLS, { wget }),
+          HOME: home,
+          WGET_SOURCE: archive,
+          WGET_HEADERS: headers,
+        },
+      });
+
+    it('installs when every redirect stays on https', async () => {
+      const result = await install(
+        [
+          '  HTTP/1.1 302 Found',
+          '  Location: https://cdn.example/s.tgz\r',
+          '  HTTP/1.1 301 Moved Permanently',
+          '  location: /elsewhere/s.tgz',
+          '  HTTP/1.1 200 OK',
+        ].join('\n'),
+      );
+      expect(parseInstallResult(result.stdout).port).toBe(45678);
+    });
+
+    it.each(['http://mirror.example/s.tgz', 'ftp://mirror.example/s.tgz'])(
+      'refuses a download that was redirected to %s',
+      async (target) => {
+        const result = await install(
+          `  HTTP/1.1 302 Found\n  Location: ${target}\r\n  HTTP/1.1 200 OK`,
+        );
+        expect(() => parseInstallResult(result.stdout)).toThrowError(
+          /redirected to an address that is not https/,
+        );
+        await expect(stat(path.join(home, '.test-server', 'bin', commit))).rejects.toThrow();
+      },
+    );
+  });
+
+  it('leaves a setup lock alone that another run took over meanwhile', async () => {
+    // A launcher that takes the lock over while this run still holds it, as a second run would.
+    const launcher = path.join(work, 'src', 'fake-server-linux-x64', 'bin', 'fake-server');
+    await writeFile(
+      launcher,
+      '#!/bin/sh\necho "1 1" > "$(dirname "$0")/../../../setup.lock/owner"\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
+    );
+    execFileSync('tar', ['-czf', archive, '-C', path.join(work, 'src'), 'fake-server-linux-x64']);
+    const result = await run(buildInstallScript(options()));
+    expect(parseInstallResult(result.stdout).port).toBe(45678);
+    const owner = path.join(home, '.test-server', 'setup.lock', 'owner');
+    expect(await readFile(owner, 'utf8')).toBe('1 1\n');
+  });
+
+  it('uses the private temporary folder when everyone may write to the home directory', async () => {
+    const tmp = path.join(work, 'tmp');
+    const shared = path.join(work, 'shared-home');
+    await mkdir(tmp);
+    await mkdir(shared);
+    await chmod(shared, 0o1777);
+    const env = { ...process.env, HOME: shared, TMPDIR: tmp };
+    const detected = await runProcess('sh', ['-s'], { stdin: detectPlatformScript, env });
+    expect(parsePlatform(detected.stdout).home).toBe(fallbackOf(tmp));
+    const result = await runProcess('sh', ['-s'], { stdin: buildInstallScript(options()), env });
+    const root = path.join(fallbackOf(tmp), '.test-server');
+    expect(parseInstallResult(result.stdout).serverDir).toBe(path.join(root, 'bin', commit));
+    process.kill(
+      Number((await readFile(path.join(root, `server-${commit}.pid`), 'utf8')).trim()),
+      'SIGKILL',
+    );
+    await expect(stat(path.join(shared, '.test-server'))).rejects.toThrow();
+  });
+
+  it('starts no server without a connection token', async () => {
+    const result = await runProcess('/bin/sh', ['-s'], {
+      stdin: buildInstallScript(options()),
+      env: {
+        PATH: await toolbox([...TOOLS.filter((tool) => tool !== 'head'), 'curl']),
+        HOME: home,
+      },
+    });
+    expect(() => parseInstallResult(result.stdout)).toThrowError(/connection token/);
+    await expect(stat(path.join(home, '.test-server', `server-${commit}.pid`))).rejects.toThrow();
   });
 });

@@ -212,7 +212,7 @@
           "default": "",
           "scope": "application",
           "ignoreSync": true,
-          "markdownDescription": "URL template for the IDE server that is installed inside the container. Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${release}`, `${os}`, `${arch}`. Leave empty to use `serverDownloadUrlTemplate` from the IDE's `product.json`, if present."
+          "markdownDescription": "URL template for the IDE server that is installed inside the container. Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${os}`, `${arch}`. Leave empty to use `serverDownloadUrlTemplate` from the IDE's `product.json`, if present."
         },
         "dev.containers.kubectlPath": {
           "type": "string",

@@ -49,7 +49,6 @@ describe('expandUrlTemplate', () => {
     commit: 'c1',
     quality: 'stable',
     version: '1.2.3',
-    release: '',
     os: 'linux',
     arch: 'x64',
   };
@@ -65,7 +64,15 @@ describe('expandUrlTemplate', () => {
   });
 
   it('rejects placeholders without a value', () => {
-    expect(() => expandUrlTemplate('https://h/${release}', vars)).toThrowError(/release/);
+    expect(() => expandUrlTemplate('https://h/${quality}', { ...vars, quality: '' })).toThrowError(
+      /no value/,
+    );
+  });
+
+  it('knows no ${release}, which no IDE build provides', () => {
+    expect(() => expandUrlTemplate('https://h/${release}', vars)).toThrowError(
+      /Unknown placeholder \$\{release\}/,
+    );
   });
 
   it('percent-encodes substituted values', () => {

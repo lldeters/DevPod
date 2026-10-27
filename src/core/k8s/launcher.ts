@@ -49,9 +49,15 @@ export const WSL_KUBECTL_SCRIPT = [
   'exec "$k" "$@"',
 ].join('; ');
 
-/** `wsl.exe` from the Windows system folder, not whatever PATH finds first. */
+/**
+ * `wsl.exe` from the Windows system folder, not whatever PATH finds first. `SystemRoot` counts only
+ * as an absolute path with a drive letter: an empty or relative value would make the result a
+ * relative path, which Windows looks up like a bare name.
+ */
 export function wslExecutable(env: NodeJS.ProcessEnv = process.env): string {
-  return path.win32.join(env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'wsl.exe');
+  const root = env['SystemRoot'];
+  const base = root !== undefined && /^[A-Za-z]:[\\/]/.test(root) ? root : 'C:\\Windows';
+  return path.win32.join(base, 'System32', 'wsl.exe');
 }
 
 /**

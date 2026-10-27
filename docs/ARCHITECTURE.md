@@ -142,6 +142,18 @@ exec -i --container=... pod -- ...` for a pod.
    with a server launcher of their own. The detection script and the install script share this
    rule (`CHOOSE_BASE_SCRIPT`). Pods often run as a user without a home directory.
 
+6. **kubectl in WSL** (Windows, `src/core/k8s/launcher.ts`). A `KubectlLauncher` says how kubectl
+   is started: directly, or with `wsl.exe` from `%SystemRoot%\System32` as
+   `wsl.exe [--distribution D] --cd ~ --exec /bin/sh -c <wrapper> kubectl <kubectl> <args...>`. `--exec` matters:
+   without it wsl.exe hands the command line to the distribution's default shell, which would
+   interpret the arguments, and the bridge passes a Node.js script as one. The fixed wrapper reads
+   `PATH` and `KUBECONFIG` from `$SHELL -l` with that shell's stdin, stdout and stderr detached (a
+   profile can neither print into the protocol nor read from it; markers separate the values from
+   any output), expands `~/` in the kubectl path and in a leading `--kubeconfig=`, converts a Windows
+   kubeconfig path with `wslpath`, and `exec`s kubectl. The pod authority records the WSL selection
+   like the kubeconfig, so a window keeps it when the settings change; every kubectl call of that
+   window (query, provisioning, bridge, tunnels) goes through it.
+
 Limits: the pod needs `sh`, `curl` or `wget` and `tar`; `kubectl exec` streams can be cut by proxies
 or API server timeouts on long idle periods (the window then reconnects); the server and what it
 installed disappear with the pod.
@@ -197,6 +209,11 @@ which `node` the bridge uses (the server's bundled one if present, else the cont
   characters), in every log line, progress message and error message from the CLI.
 - The kubectl path and kubeconfig taken over from the Kubernetes extension are read from the user
   settings only (`inspect().globalValue`), so a workspace cannot choose a program or kubeconfig.
+  The same holds for whether kubectl runs in WSL (`dev.containers.kubectlInWSL`, the Kubernetes
+  extension's `use-wsl`).
+- kubectl in WSL runs with `wsl.exe --exec`, never through the distribution's default shell; batch
+  files (`.cmd`, `.bat`) are not supported as kubectl, since starting them needs `cmd.exe` and its
+  quoting rules.
 - The connection token is generated in the container, stored with mode 600 and passed to the
   server as a file, not as an argument.
 - `argv.json` is only modified after an explicit modal confirmation.

@@ -30,8 +30,8 @@ describe.skipIf(!enabled)('Kubernetes pod end to end', () => {
   let ref: PodRef;
   const logger = new MemoryLogger();
   const client = new Kubectl(
-    () => 'kubectl',
-    () => undefined,
+    () => ({ kubectl: 'kubectl' }),
+    () => ({}),
   );
 
   beforeAll(async () => {
@@ -115,7 +115,7 @@ describe.skipIf(!enabled)('Kubernetes pod end to end', () => {
   });
 
   it('installs the server in the pod, reuses it, and relays a port out of it', async () => {
-    const executor = new KubectlExecutor(() => 'kubectl', ref);
+    const executor = new KubectlExecutor(() => ({ kubectl: 'kubectl' }), ref);
     const input = {
       containerId: `${ref.namespace}/${ref.pod}`,
       urlTemplate: 'file:///tmp/server.tar.gz',

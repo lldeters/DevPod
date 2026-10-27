@@ -7,6 +7,8 @@ import { runProcess } from '../process';
 import type { RunResult } from '../process';
 import type { ExecOptions } from '../engine/containerEngine';
 import type { ServerExecutor } from '../server/provisioner';
+import { describeWsl, kubectlProcess, wslExecutable } from './launcher';
+import type { KubectlLauncher, WslSelection } from './launcher';
 import { assertPodRef } from './podRef';
 import type { PodRef } from './podRef';
 
@@ -45,7 +47,7 @@ export class KubectlTarget implements ExecTarget {
   readonly label: string;
 
   constructor(
-    private readonly kubectlPath: string,
+    private readonly launcher: KubectlLauncher,
     private readonly ref: PodRef,
   ) {
     assertPodRef(ref);
@@ -53,7 +55,7 @@ export class KubectlTarget implements ExecTarget {
   }
 
   spec(command: readonly string[]): ProcessSpec {
-    return { command: this.kubectlPath, args: kubectlExecArgs(this.ref, command) };
+    return kubectlProcess(this.launcher, kubectlExecArgs(this.ref, command));
   }
 }
 
@@ -63,14 +65,18 @@ export class KubectlTarget implements ExecTarget {
  */
 export class KubectlExecutor implements ServerExecutor {
   constructor(
-    private readonly kubectlPath: () => string,
+    private readonly launcher: () => KubectlLauncher,
     private readonly ref: PodRef,
   ) {
     assertPodRef(ref);
   }
 
   exec(options: ExecOptions & { stdin?: string; signal?: AbortSignal }): Promise<RunResult> {
-    return runProcess(this.kubectlPath(), kubectlExecArgs(this.ref, options.command), {
+    const { command, args } = kubectlProcess(
+      this.launcher(),
+      kubectlExecArgs(this.ref, options.command),
+    );
+    return runProcess(command, args, {
       ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
@@ -161,35 +167,87 @@ export function parseNames(json: string): string[] {
   }
 }
 
+/** Which cluster access the listing queries use: kubeconfig, and whether kubectl runs in WSL. */
+export interface KubectlScope {
+  readonly kubeconfig?: string;
+  readonly wsl?: WslSelection;
+}
+
+/** Why kubectl could not be started at all, and what to do about it. */
+export function notStartedMessage(launcher: KubectlLauncher): string {
+  if (launcher.wsl) {
+    return `Could not start WSL (${wslExecutable()}). Install WSL, or turn off "dev.containers.kubectlInWSL".`;
+  }
+  if (/\.(cmd|bat)$/i.test(launcher.kubectl)) {
+    return (
+      `"${launcher.kubectl}" is a batch file, which cannot be started without a shell. Set ` +
+      '"dev.containers.kubectlPath" to kubectl.exe, or run kubectl in WSL with "dev.containers.kubectlInWSL".'
+    );
+  }
+  return `Could not run "${launcher.kubectl}". Install kubectl or set "dev.containers.kubectlPath".`;
+}
+
+/** The error for a kubectl query (`subcommand`, such as `get`) that exited with a failure. */
+export function queryFailure(
+  launcher: KubectlLauncher,
+  subcommand: string,
+  result: { code: number | null; stderr: string; stdout?: string },
+): DevContainerError {
+  // wsl.exe writes some of its own messages in UTF-16, and some to stdout.
+  const text = (result.stderr.trim() === '' ? (result.stdout ?? '') : result.stderr).replaceAll(
+    '\0',
+    '',
+  );
+  const detail = text.trim().split('\n').slice(-3).join('\n');
+  if (launcher.wsl && result.code === 127) {
+    return new DevContainerError(
+      'ENGINE_UNAVAILABLE',
+      `kubectl was not found ${describeWsl(launcher.wsl)}${detail ? ` (${detail})` : ''}. ` +
+        'Install it there, or set "dev.containers.kubectlPath" to its Linux path. PATH is read ' +
+        'from the login profile (~/.profile, ~/.bash_profile or ~/.zprofile), not from ~/.bashrc.',
+    );
+  }
+  const where = launcher.wsl ? ` (${describeWsl(launcher.wsl)})` : '';
+  return new DevContainerError(
+    'CLI_FAILED',
+    `kubectl ${subcommand}${where} failed${detail ? `: ${detail}` : '.'}`,
+  );
+}
+
 /** Read-only kubectl queries used to choose what to attach to. */
 export class Kubectl {
   constructor(
-    private readonly kubectlPath: () => string,
-    private readonly kubeconfig: () => string | undefined,
+    /** How kubectl is started, directly or in the given WSL distribution; read for every call. */
+    private readonly launcher: (wsl: WslSelection | undefined) => KubectlLauncher,
+    /** The kubeconfig and WSL mode of the listing queries; read for every call. */
+    private readonly current: () => KubectlScope,
   ) {}
 
-  private run(args: string[]): Promise<string> {
-    return this.runWith(this.kubeconfig(), args);
+  /** What the listing queries use now; an attach records it in the window's target. */
+  scope(): KubectlScope {
+    return this.current();
   }
 
-  private async runWith(kubeconfig: string | undefined, args: string[]): Promise<string> {
-    const kubectl = this.kubectlPath();
+  private run(args: string[]): Promise<string> {
+    return this.runWith(this.current(), args);
+  }
+
+  private async runWith(scope: KubectlScope, args: string[]): Promise<string> {
+    const launcher = this.launcher(scope.wsl);
+    const { command, args: processArgs } = kubectlProcess(launcher, [
+      ...kubectlBaseArgs({ kubeconfig: scope.kubeconfig }),
+      ...args,
+    ]);
     let result: RunResult;
     try {
-      result = await runProcess(kubectl, [...kubectlBaseArgs({ kubeconfig }), ...args]);
+      result = await runProcess(command, processArgs);
     } catch (error) {
-      throw new DevContainerError(
-        'ENGINE_UNAVAILABLE',
-        `Could not run "${kubectl}". Install kubectl or set "dev.containers.kubectlPath".`,
-        { cause: error },
-      );
+      throw new DevContainerError('ENGINE_UNAVAILABLE', notStartedMessage(launcher), {
+        cause: error,
+      });
     }
     if (result.code !== 0) {
-      const detail = result.stderr.trim().split('\n').slice(-3).join('\n');
-      throw new DevContainerError(
-        'CLI_FAILED',
-        `kubectl ${args[0] ?? ''} failed${detail ? `: ${detail}` : '.'}`,
-      );
+      throw queryFailure(launcher, args[0] ?? '', result);
     }
     return result.stdout;
   }
@@ -220,20 +278,21 @@ export class Kubectl {
   }
 
   /**
-   * Describes one pod. Unlike the listing methods, which use the configured kubeconfig, this uses
-   * exactly the kubeconfig of `selection`: it must query the cluster the connection will use, even
-   * if the setting has changed since the connection was made.
+   * Describes one pod. Unlike the listing methods, which use the configured kubeconfig and WSL
+   * mode, this uses exactly those of `selection`: it must query the cluster the connection will
+   * use, even if the settings have changed since the connection was made.
    */
   async pod(selection: {
     context?: string;
     namespace: string;
     pod: string;
     kubeconfig?: string;
+    wsl?: WslSelection;
   }): Promise<PodInfo> {
     // Validated like an attach target, since the values become arguments.
     assertPodRef({ ...selection, container: 'placeholder' });
     return parsePodInfo(
-      await this.runWith(selection.kubeconfig, [
+      await this.runWith(selection, [
         ...kubectlBaseArgs({ context: selection.context, namespace: selection.namespace }),
         'get',
         'pod',

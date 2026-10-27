@@ -137,13 +137,13 @@ describe('kubectl arguments', () => {
 
   it('refuses to build arguments for an invalid target', () => {
     expect(() => kubectlExecArgs({ ...ref, pod: '--all' }, ['sh'])).toThrow();
-    expect(() => new KubectlTarget('kubectl', { ...ref, container: '-x' })).toThrow();
+    expect(() => new KubectlTarget({ kubectl: 'kubectl' }, { ...ref, container: '-x' })).toThrow();
   });
 });
 
 describe('exec targets', () => {
   it('describes a pod container for logs and runs kubectl', () => {
-    const target = new KubectlTarget('/usr/bin/kubectl', ref);
+    const target = new KubectlTarget({ kubectl: '/usr/bin/kubectl' }, ref);
     expect(target.label).toBe('team-a/web-7d9f/app');
     expect(target.spec(['id'])).toEqual({
       command: '/usr/bin/kubectl',

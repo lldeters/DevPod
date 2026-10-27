@@ -31,6 +31,9 @@ steps to reproduce and the impact you see.
   look like secrets (for example `NPM_TOKEN`), are masked in everything logged or shown from the
   Dev Container CLI, so a log can be shared. Show Diagnostics replaces the home directory by `~`.
 - Paths to programs and to kubeconfig files come from user (or machine) settings only, never from a
-  workspace; this includes the fallback to the Kubernetes extension's settings.
+  workspace; this includes the fallback to the Kubernetes extension's settings and whether kubectl
+  runs in WSL. In WSL, kubectl is started with `wsl.exe --exec`, so no shell interprets its
+  arguments; the login profile is read only for `PATH` and `KUBECONFIG`, with its input and output
+  detached.
 - The extension edits the IDE's `argv.json` (to enable a proposed API) only after an explicit
   confirmation.

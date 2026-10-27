@@ -30,6 +30,7 @@
   an unknown placeholder.
 - On Windows, `wsl.exe` is always taken from an absolute system folder, also when `SystemRoot` is
   empty or not an absolute path.
+- At most 200 ports are forwarded at once per window; further requests are refused and logged.
 
 ## 0.2.0 (2026-10-27)
 

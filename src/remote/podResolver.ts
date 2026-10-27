@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from 'vscode';
-import { errorMessage } from '../core/errors';
+import { errorMessage, notificationText } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
 import { KubectlExecutor, KubectlTarget } from '../core/k8s/kubectl';
 import type { Kubectl } from '../core/k8s/kubectl';
@@ -51,7 +51,11 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
       return await this.start(authority);
     } catch (error) {
       this.deps.logger.log('error', `Could not attach to the pod: ${errorMessage(error)}`);
-      throw vscode.RemoteAuthorityResolverError.NotAvailable(errorMessage(error), false);
+      // The IDE shows the message in a notification.
+      throw vscode.RemoteAuthorityResolverError.NotAvailable(
+        notificationText(errorMessage(error)),
+        false,
+      );
     }
   }
 

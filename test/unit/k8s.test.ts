@@ -205,6 +205,13 @@ describe('parsePodInfo', () => {
     expect(info.phase).toBe('Pending');
   });
 
+  it.each([['Evicted [x](command:y)'], [42], [undefined]])(
+    'takes a phase that is not one of the pod phases as Unknown (%j)',
+    (phase) => {
+      expect(parsePodInfo(podJson({ status: { phase } })).phase).toBe('Unknown');
+    },
+  );
+
   it.each(['', 'not json', '{}', '{"metadata":{}}'])('rejects %j', (input) => {
     expect(() => parsePodInfo(input)).toThrow();
   });

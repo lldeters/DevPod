@@ -10,6 +10,8 @@
   machine only; such settings in a `devcontainer.json` are reported in the log and not applied.
 - Forwarded ports no longer cut off the end of a response when the client reads more slowly than
   the container sends.
+- Error messages and progress notifications no longer turn `[text](link)` in the output of a
+  container, a pod, kubectl or the Dev Container CLI into a clickable link.
 
 ## 0.2.0 (2026-10-27)
 

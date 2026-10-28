@@ -4,7 +4,12 @@
 import * as vscode from 'vscode';
 import { errorMessage } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
-import { KubectlExecutor, KubectlTarget, noCurrentContextError } from '../core/k8s/kubectl';
+import {
+  KubectlExecutor,
+  KubectlTarget,
+  noContextError,
+  noCurrentContextError,
+} from '../core/k8s/kubectl';
 import type { Kubectl } from '../core/k8s/kubectl';
 import { describeWsl } from '../core/k8s/launcher';
 import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
@@ -78,7 +83,11 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
 
   private async withCurrentContext(ref: PodRef): Promise<PodRef> {
     const context = await this.deps.kubectl.currentContext(ref);
-    if (context === undefined) throw noCurrentContextError(ref, 'window');
+    if (context === undefined) {
+      throw (await this.deps.kubectl.contexts(ref)).length === 0
+        ? noContextError(ref)
+        : noCurrentContextError(ref, 'window');
+    }
     this.deps.logger.log('info', `The target names no context; using the current one, ${context}`);
     return { ...ref, context };
   }

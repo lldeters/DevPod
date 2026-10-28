@@ -122,9 +122,13 @@ exec -i --container=... pod -- ...` for a pod.
 2. **Which pod.** VS Code passes the clicked tree node to the command. It is resolved through the
    Kubernetes extension's public API (`vscode-kubernetes-tools-api`, MIT, bundled) to namespace and
    pod name. The explorer shows pods of the _current_ context, so that context is read with
-   `kubectl config current-context` and stored in the connection. Without a click (command palette)
-   the pod is chosen step by step (context, namespace, pod); if listing namespaces is forbidden the
-   namespace is typed instead.
+   `kubectl config view --output=jsonpath={.current-context}` (empty, not an error, when there is
+   none or no kubeconfig) and stored in the connection; without a current context the attach is
+   refused with the likely cause (another kubeconfig, or on Windows another kubectl). Without a
+   click (command palette) the pod is chosen step by step (context, namespace, pod): without a
+   current context every context is offered (the only one is taken without asking), without any
+   context the message says where kubectl looked; if listing namespaces is forbidden the namespace
+   is typed instead, and any other failure to list them is reported.
 3. **Authority.** `k8s-pod+<hex(json)>` holds context, namespace, pod, container and, if one is
    configured, the kubeconfig path. Every field is validated against Kubernetes naming rules; none
    may start with a dash, and kubectl is always given `--flag=value` forms. The new window is opened
@@ -132,9 +136,11 @@ exec -i --container=... pod -- ...` for a pod.
 4. **Resolving.** An authority that "Attach to Kiro" did not open itself is confirmed first, with
    pod, container, context and kubeconfig spelled out, since the kubeconfig decides which server
    kubectl contacts and can run commands (exec credential plugins); a kubeconfig on a network share
-   is refused. `PodResolver` then asks `kubectl get pod` (with the kubeconfig _of the connection_, not
-   of the current settings) and refuses with a clear message unless the pod and container are
-   running. It then provisions the server through `kubectl exec ... -- sh -s`, as for containers,
+   is refused. A target without a context (only possible from a link) is fixed to the current
+   context of its kubeconfig for this connection, or refused when there is none, instead of
+   kubectl's fallback to `localhost:8080`. `PodResolver` then asks `kubectl get pod` (with the
+   kubeconfig _of the connection_, not of the current settings) and refuses with a clear message
+   unless the pod and container are running. It then provisions the server through `kubectl exec ... -- sh -s`, as for containers,
    and returns the connection factory.
 5. **Where the server lives.** `$HOME` if it is a writable directory, otherwise the private folder
    `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`), which is used only if it is a real directory

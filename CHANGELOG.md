@@ -11,9 +11,10 @@
   connection, instead of kubectl's fallback to `localhost:8080`.
 - WSL's own errors get a clear message: a distribution that does not exist names
   `dev.containers.kubectlWSLDistro` and `wsl.exe --list --verbose`; a missing default distribution
-  says how to install one. WSL messages are read in UTF-8 (`WSL_UTF8=1`).
+  says how to install one; other WSL failures (for example virtualization turned off) show WSL's
+  first line and error code. WSL messages are read in UTF-8 (`WSL_UTF8=1`).
 - Error messages name the kubectl command that failed (such as `get pods`) and leave out kubectl's
-  internal log lines. A failure to list namespaces is only answered with the namespace question
+  internal log lines, so a missing credential plugin (such as `kubelogin`) is named. A failure to list namespaces is only answered with the namespace question
   when listing is forbidden; other errors are reported.
 - The log names the kubectl, kubeconfig and WSL setting of every attach.
 

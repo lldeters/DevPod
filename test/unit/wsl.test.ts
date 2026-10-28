@@ -312,6 +312,45 @@ describe("WSL's own failures", () => {
     );
   });
 
+  it('does not take a WSL failure with another code for a missing distribution', () => {
+    // Virtualization off: the hint mentions "wsl.exe --install --no-distribution".
+    const hcs =
+      'WSL2 kann nicht gestartet werden, da die Virtualisierung nicht aktiviert ist.\r\n' +
+      'Aktivieren Sie "VM-Plattform" mit: wsl.exe --install --no-distribution\r\n' +
+      'Fehlercode: Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED\r\n';
+    expect(
+      queryFailure(wsl, 'config view', { code: 4294967295, stdout: hcs, stderr: '' }).message,
+    ).toBe(
+      'WSL could not run kubectl in WSL (Ubuntu-24.04): WSL2 kann nicht gestartet werden, da die ' +
+        'Virtualisierung nicht aktiviert ist. (HCS_E_HYPERV_NOT_INSTALLED).',
+    );
+    const component =
+      'Für WSL ist die optionale Komponente erforderlich.\r\n' +
+      'Führen Sie "wsl.exe --install --no-distribution" aus.\r\n' +
+      'Fehlercode: Wsl/WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED\r\n';
+    expect(
+      queryFailure({ kubectl: 'kubectl', wsl: {} }, 'config view', {
+        code: 4294967295,
+        stdout: component,
+        stderr: '',
+      }).message,
+    ).toMatch(/^WSL could not run kubectl in WSL: .*\(WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED\)\.$/);
+  });
+
+  it('finds the code on stderr too, and the default-distribution code on its own', () => {
+    expect(
+      queryFailure(wsl, 'config view', { code: 1, stdout: '', stderr: utf16(DISTRO_NOT_FOUND_DE) })
+        .message,
+    ).toMatch(/^WSL has no distribution named "Ubuntu-24\.04"/);
+    expect(
+      queryFailure({ kubectl: 'kubectl', wsl: {} }, 'config view', {
+        code: 4294967295,
+        stdout: 'Kein Standard.\r\nFehlercode: Wsl/Service/WSL_E_DEFAULT_DISTRO_NOT_FOUND\r\n',
+        stderr: '',
+      }).message,
+    ).toMatch(/^WSL has no default distribution to run kubectl in\./);
+  });
+
   it("leaves kubectl's own errors alone, also in WSL", () => {
     expect(
       queryFailure(wsl, 'get pods', {
@@ -332,6 +371,36 @@ describe('the detail of a kubectl failure', () => {
     expect(queryFailure({ kubectl: 'kubectl' }, 'get pod', { code: 1, stderr }).message).toBe(
       'kubectl get pod failed: The connection to the server localhost:8080 was refused - did you ' +
         'specify the right host or port?',
+    );
+  });
+
+  it('keeps the line that names a missing credential plugin, without the klog entries', () => {
+    const entry =
+      'E1028 10:02:01.325550    2246 memcache.go:381] "Couldn\'t get current server API group list" err=<\n' +
+      '\tGet "https://127.0.0.1:1/api?timeout=32s": getting credentials: exec: executable kubelogin not found\n' +
+      '\t\n' +
+      '\tIt looks like you are trying to use a client-go credential plugin that is not installed.\n' +
+      '\t\n' +
+      '\tTo learn more about this feature, consult the documentation available at:\n' +
+      '\t      https://kubernetes.io/docs/reference/access-authn-authz/authentication/#client-go-credential-plugins\n' +
+      ' >\n';
+    // As kubectl v1.37 prints it: several klog entries, then the message and its explanation.
+    const stderr =
+      entry +
+      entry +
+      'Unable to connect to the server: getting credentials: exec: executable kubelogin not found\n' +
+      '\n' +
+      'It looks like you are trying to use a client-go credential plugin that is not installed.\n' +
+      '\n' +
+      'To learn more about this feature, consult the documentation available at:\n' +
+      '      https://kubernetes.io/docs/reference/access-authn-authz/authentication/#client-go-credential-plugins\n';
+    expect(
+      queryFailure({ kubectl: 'kubectl', wsl: {} }, 'get namespaces', { code: 1, stderr }).message,
+    ).toBe(
+      'kubectl get namespaces (in WSL) failed: Unable to connect to the server: getting credentials: ' +
+        'exec: executable kubelogin not found\n' +
+        'It looks like you are trying to use a client-go credential plugin that is not installed.\n' +
+        'To learn more about this feature, consult the documentation available at:',
     );
   });
 
@@ -360,10 +429,13 @@ describe('missing contexts', () => {
     expect(message).toMatch(
       /^kubectl in WSL \(ubuntu-2404\) found no Kubernetes context in ~\/\.kube\/config/,
     );
-    expect(message).toContain('KUBECONFIG names in the login profile (~/.profile, not ~/.bashrc)');
     expect(message).toContain(
-      'If your kubeconfig is on Windows, set "dev.containers.kubeconfigPath"',
+      'KUBECONFIG names in the login profile (~/.profile, ~/.bash_profile or ~/.zprofile, not ~/.bashrc)',
     );
+    expect(message).toContain(
+      'If your kubeconfig is on Windows, copy it into the distribution or set "dev.containers.kubeconfigPath"',
+    );
+    expect(message).toContain('credential plugins it names must then exist in WSL');
     expect(message).toContain('"wsl --import" runs as root');
     expect(message).toContain('"dev.containers.kubectlInWSL" to false');
     expect(noContextError({ wsl: {}, kubeconfig: '~/.kube/work' }).message).toMatch(
@@ -371,10 +443,24 @@ describe('missing contexts', () => {
     );
   });
 
-  it('explains a missing current context for the explorer and for a window', () => {
-    expect(noCurrentContextError({ wsl: { distro: 'u' } }, 'explorer').message).toMatch(
-      /^kubectl in WSL \(u\) has no current Kubernetes context.*"vs-kubernetes\.use-wsl".*use-context <name>" in that distribution/s,
+  it('explains a missing current context for the explorer, with the Windows causes only there', () => {
+    const windows = noCurrentContextError({ wsl: { distro: 'u' } }, 'explorer', 'win32').message;
+    expect(windows).toMatch(
+      /^kubectl in WSL \(u\) has no current Kubernetes context in its default kubeconfig, so it does not know the cluster of the Kubernetes explorer, which may read another kubeconfig/,
     );
+    expect(windows).toContain('"vs-kubernetes.use-wsl" in the default WSL distribution');
+    expect(windows).toContain('use-context <name>" in that distribution');
+    const linux = noCurrentContextError({ kubeconfig: '/home/me/.kube/team' }, 'explorer', 'linux');
+    expect(linux.message).toMatch(
+      /^kubectl has no current Kubernetes context in "\/home\/me\/\.kube\/team"/,
+    );
+    expect(linux.message).not.toContain('Windows');
+    expect(linux.message).toContain(
+      'Set one with "kubectl config use-context <name> --kubeconfig=/home/me/.kube/team", or attach',
+    );
+  });
+
+  it('explains a missing current context for a window', () => {
     expect(noCurrentContextError({}, 'window').message).toBe(
       'This window names no Kubernetes context, and kubectl has no current one. Set one with ' +
         '"kubectl config use-context <name>", or attach to the pod again.',

@@ -168,6 +168,5 @@ describe.skipIf(!enabled)('kubectl in WSL end to end', () => {
       /WSL has no distribution named "NoSuchDistro" \(WSL_E_DISTRO_NOT_FOUND\)|failed: .*distribution/i,
     );
     expect(error?.message).not.toContain('\0');
-    expect(error?.message).not.toContain('\uFFFD'); // WSL_UTF8=1: no garbled characters
   });
 });

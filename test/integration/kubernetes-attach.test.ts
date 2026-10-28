@@ -160,7 +160,7 @@ describe('attach from the Kubernetes explorer', () => {
     await stub.unset('current-context');
     await stub.set('contexts', 'ctx-a\nctx-b\n');
     await expect(attachToPod(dependencies({ target: clickedPod }), {})).rejects.toThrow(
-      /no current Kubernetes context.*vs-kubernetes\.use-wsl/s,
+      /^kubectl has no current Kubernetes context in its default kubeconfig.*may read another kubeconfig/s,
     );
     expect(openedWindow()).toBeUndefined();
     expect((await stub.calls()).some((args) => args.includes('pod'))).toBe(false);

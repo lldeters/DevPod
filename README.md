@@ -137,8 +137,9 @@ often set up only inside WSL. With `dev.containers.kubectlInWSL` (and optionally
 attaching, the connection and port forwarding. If you leave the setting unset, the Kubernetes
 extension's `vs-kubernetes.use-wsl` decides, so _Attach to Kiro_ uses the same kubectl as its
 explorer. That extension always uses the **default** distribution: leave
-`dev.containers.kubectlWSLDistro` empty, or set it to the default one, so both see the same
-clusters.
+`dev.containers.kubectlWSLDistro` empty, or set it to the default one, so both use the same
+distribution. (It also does not read the login profile, so a `KUBECONFIG` set there is seen only
+by this extension.)
 
 - `kubectl` is found through the `PATH` of your login shell, which is read from the login profile
   (`~/.profile`, `~/.bash_profile` or `~/.zprofile`), **not** from `~/.bashrc`. The same goes for

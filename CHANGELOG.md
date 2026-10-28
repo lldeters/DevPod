@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Attaching to a pod no longer fails with "current-context is not set" when the kubeconfig has no
+  current context: the command palette offers the contexts (and takes the only one without
+  asking). When kubectl finds no kubeconfig at all, the message says where it looked and, in WSL,
+  names the usual causes (kubeconfig on Windows, `KUBECONFIG` only in `~/.bashrc`, a distribution
+  that runs as root). _Attach to Kiro_ in the Kubernetes explorer explains when kubectl has no
+  current context, and a window target without a context uses the current one, fixed for the
+  connection, instead of kubectl's fallback to `localhost:8080`.
+- WSL's own errors get a clear message: a distribution that does not exist names
+  `dev.containers.kubectlWSLDistro` and `wsl.exe --list --verbose`; a missing default distribution
+  says how to install one. WSL messages are read in UTF-8 (`WSL_UTF8=1`).
+- Error messages name the kubectl command that failed (such as `get pods`) and leave out kubectl's
+  internal log lines. A failure to list namespaces is only answered with the namespace question
+  when listing is forbidden; other errors are reported.
+- The log names the kubectl, kubeconfig and WSL setting of every attach.
+
 ## 0.2.0 (2026-10-27)
 
 - **kubectl in WSL** (Windows): `dev.containers.kubectlInWSL` and `dev.containers.kubectlWSLDistro`

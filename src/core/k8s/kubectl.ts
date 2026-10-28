@@ -187,18 +187,75 @@ export function notStartedMessage(launcher: KubectlLauncher): string {
   return `Could not run "${launcher.kubectl}". Install kubectl or set "dev.containers.kubectlPath".`;
 }
 
-/** The error for a kubectl query (`subcommand`, such as `get`) that exited with a failure. */
+// kubectl's own log lines (klog), such as "E1028 09:05:27.691553  284 memcache.go:381] ...".
+const KLOG_LINE = /^[IWEF]\d{4} \d\d:\d\d:\d\d\.\d+\s+\d+ [\w.-]+:\d+\]/;
+
+/** The last lines that say something: without carriage returns, NULs (UTF-16) and klog noise. */
+function tail(output: string, lines = 3): string {
+  const all = output
+    .replaceAll('\0', '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  const messages = all.filter((line) => !KLOG_LINE.test(line));
+  return (messages.length > 0 ? messages : all).slice(-lines).join('\n');
+}
+
+/**
+ * wsl.exe's own failures. Their text is in the Windows display language and goes to stdout, so
+ * only the error code (which is never translated) and the command names are matched.
+ */
+function wslFailure(wsl: WslSelection, output: string): DevContainerError | undefined {
+  const text = output.replaceAll('\0', '');
+  const code = /\bWSL_E_[A-Z0-9_]+\b/.exec(text)?.[0];
+  if (code === 'WSL_E_DISTRO_NOT_FOUND' && wsl.distro !== undefined) {
+    return new DevContainerError(
+      'CONFIG_INVALID',
+      `WSL has no distribution named "${wsl.distro}" (${code}). "wsl.exe --list --verbose" shows ` +
+        'the installed ones (case does not matter, dots and dashes do); set ' +
+        '"dev.containers.kubectlWSLDistro" to one of them, or leave it empty for the default ' +
+        'distribution. A window keeps the distribution it was attached with: attach to the pod ' +
+        'again after changing the setting.',
+    );
+  }
+  if (
+    code === 'WSL_E_DISTRO_NOT_FOUND' ||
+    code === 'WSL_E_DEFAULT_DISTRO_NOT_FOUND' ||
+    /wsl(\.exe)? --install\b/.test(text)
+  ) {
+    return new DevContainerError(
+      'ENGINE_UNAVAILABLE',
+      'WSL has no default distribution to run kubectl in. Install one ("wsl.exe --install ' +
+        'Ubuntu-24.04"), name one in "dev.containers.kubectlWSLDistro", or run kubectl on Windows ' +
+        '("dev.containers.kubectlInWSL": false).',
+    );
+  }
+  if (code !== undefined) {
+    const first = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line !== '' && !line.includes(code));
+    return new DevContainerError(
+      'ENGINE_UNAVAILABLE',
+      `WSL could not run kubectl ${describeWsl(wsl)}: ${first ? `${first} ` : ''}(${code}).`,
+    );
+  }
+  return undefined;
+}
+
+/** The error for a kubectl query (`label`, such as "get pods") that exited with a failure. */
 export function queryFailure(
   launcher: KubectlLauncher,
-  subcommand: string,
+  label: string,
   result: { code: number | null; stderr: string; stdout?: string },
 ): DevContainerError {
-  // wsl.exe writes some of its own messages in UTF-16, and some to stdout.
-  const text = (result.stderr.trim() === '' ? (result.stdout ?? '') : result.stderr).replaceAll(
-    '\0',
-    '',
-  );
-  const detail = text.trim().split('\n').slice(-3).join('\n');
+  const stdout = result.stdout ?? '';
+  if (launcher.wsl) {
+    // wsl.exe writes its own errors to stdout, and warnings to stderr.
+    const failure = wslFailure(launcher.wsl, `${stdout}\n${result.stderr}`);
+    if (failure) return failure;
+  }
+  const detail = tail(result.stderr.trim() === '' ? stdout : result.stderr);
   if (launcher.wsl && result.code === 127) {
     return new DevContainerError(
       'ENGINE_UNAVAILABLE',
@@ -210,7 +267,57 @@ export function queryFailure(
   const where = launcher.wsl ? ` (${describeWsl(launcher.wsl)})` : '';
   return new DevContainerError(
     'CLI_FAILED',
-    `kubectl ${subcommand}${where} failed${detail ? `: ${detail}` : '.'}`,
+    `kubectl ${label}${where} failed${detail ? `: ${detail}` : '.'}`,
+  );
+}
+
+/** "kubectl" or "kubectl in WSL (Ubuntu)", for messages. */
+function kubectlIn(wsl: WslSelection | undefined): string {
+  return wsl ? `kubectl ${describeWsl(wsl)}` : 'kubectl';
+}
+
+/** kubectl lists no context at all: its kubeconfig does not exist, or is empty. */
+export function noContextError(scope: KubectlScope): DevContainerError {
+  const file = scope.kubeconfig === undefined ? undefined : `"${scope.kubeconfig}"`;
+  if (!scope.wsl) {
+    return new DevContainerError(
+      'CONFIG_NOT_FOUND',
+      `kubectl found no Kubernetes context in ${file ?? 'its kubeconfig (KUBECONFIG, else ~/.kube/config)'}: ` +
+        'the file does not exist or lists no contexts. Set "dev.containers.kubeconfigPath" to your ' +
+        'kubeconfig.',
+    );
+  }
+  return new DevContainerError(
+    'CONFIG_NOT_FOUND',
+    `${kubectlIn(scope.wsl)} found no Kubernetes context in ` +
+      `${file ?? "~/.kube/config of the distribution's default user, or the file that KUBECONFIG names in the login profile (~/.profile, not ~/.bashrc)"}: ` +
+      'the file does not exist there or lists no contexts. If your kubeconfig is on Windows, set ' +
+      '"dev.containers.kubeconfigPath" to it (for example C:\\Users\\<you>\\.kube\\config). A ' +
+      'distribution created with "wsl --import" runs as root unless it has a default user. To run ' +
+      'kubectl on Windows instead, set "dev.containers.kubectlInWSL" to false.',
+  );
+}
+
+/** kubectl has contexts, but none is current, where only the current one can be meant. */
+export function noCurrentContextError(
+  scope: KubectlScope,
+  situation: 'explorer' | 'window',
+): DevContainerError {
+  const set = `Set one with "kubectl config use-context <name>"${scope.wsl ? ' in that distribution' : ''}`;
+  if (situation === 'explorer') {
+    return new DevContainerError(
+      'CONFIG_INVALID',
+      `${kubectlIn(scope.wsl)} has no current Kubernetes context, so it does not know the ` +
+        'cluster of the Kubernetes explorer. The explorer may use another kubectl: the Kubernetes ' +
+        'extension runs kubectl on Windows, or with "vs-kubernetes.use-wsl" in the default WSL ' +
+        `distribution. ${set}, or attach from the command palette ("Attach to Running Kubernetes ` +
+        'Container...").',
+    );
+  }
+  return new DevContainerError(
+    'CONFIG_INVALID',
+    `This window names no Kubernetes context, and ${kubectlIn(scope.wsl)} has no current one. ` +
+      `${set}, or attach to the pod again.`,
   );
 }
 
@@ -228,11 +335,19 @@ export class Kubectl {
     return this.current();
   }
 
-  private run(args: string[]): Promise<string> {
-    return this.runWith(this.current(), args);
+  /** Which kubectl and kubeconfig `scope` means, for the log. */
+  describe(scope: KubectlScope = this.current()): string {
+    return (
+      `kubectl "${this.launcher(scope.wsl).kubectl}"${scope.wsl ? ` ${describeWsl(scope.wsl)}` : ''}, ` +
+      `kubeconfig ${scope.kubeconfig === undefined ? "kubectl's default" : `"${scope.kubeconfig}"`}`
+    );
   }
 
-  private async runWith(scope: KubectlScope, args: string[]): Promise<string> {
+  private run(label: string, args: string[]): Promise<string> {
+    return this.runWith(this.current(), label, args);
+  }
+
+  private async runWith(scope: KubectlScope, label: string, args: string[]): Promise<string> {
     const launcher = this.launcher(scope.wsl);
     const { command, args: processArgs } = kubectlProcess(launcher, [
       ...kubectlBaseArgs({ kubeconfig: scope.kubeconfig }),
@@ -240,26 +355,41 @@ export class Kubectl {
     ]);
     let result: RunResult;
     try {
-      result = await runProcess(command, processArgs);
+      // WSL_UTF8 makes wsl.exe write its own messages in UTF-8 instead of UTF-16.
+      result = await runProcess(
+        command,
+        processArgs,
+        launcher.wsl ? { env: { ...process.env, WSL_UTF8: '1' } } : {},
+      );
     } catch (error) {
       throw new DevContainerError('ENGINE_UNAVAILABLE', notStartedMessage(launcher), {
         cause: error,
       });
     }
     if (result.code !== 0) {
-      throw queryFailure(launcher, args[0] ?? '', result);
+      throw queryFailure(launcher, label, result);
     }
     return result.stdout;
   }
 
-  /** The kubeconfig's current context, which is what the Kubernetes explorer shows. */
-  async currentContext(): Promise<string | undefined> {
-    const name = (await this.run(['config', 'current-context'])).trim();
+  /**
+   * The kubeconfig's current context, which is what the Kubernetes explorer shows; `undefined`
+   * when there is none. `kubectl config current-context` would fail in that case, and also when
+   * there is no kubeconfig at all, which `config view` reports as empty instead.
+   */
+  async currentContext(scope: KubectlScope = this.current()): Promise<string | undefined> {
+    const name = (
+      await this.runWith(scope, 'config view', [
+        'config',
+        'view',
+        '--output=jsonpath={.current-context}',
+      ])
+    ).trim();
     return name === '' ? undefined : name;
   }
 
   async contexts(): Promise<string[]> {
-    return (await this.run(['config', 'get-contexts', '--output=name']))
+    return (await this.run('config get-contexts', ['config', 'get-contexts', '--output=name']))
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '');
@@ -267,13 +397,25 @@ export class Kubectl {
 
   async namespaces(context: string | undefined): Promise<string[]> {
     return parseNames(
-      await this.run([...kubectlBaseArgs({ context }), 'get', 'namespaces', '-o', 'json']),
+      await this.run('get namespaces', [
+        ...kubectlBaseArgs({ context }),
+        'get',
+        'namespaces',
+        '-o',
+        'json',
+      ]),
     );
   }
 
   async pods(context: string | undefined, namespace: string): Promise<string[]> {
     return parseNames(
-      await this.run([...kubectlBaseArgs({ context, namespace }), 'get', 'pods', '-o', 'json']),
+      await this.run('get pods', [
+        ...kubectlBaseArgs({ context, namespace }),
+        'get',
+        'pods',
+        '-o',
+        'json',
+      ]),
     );
   }
 
@@ -292,7 +434,7 @@ export class Kubectl {
     // Validated like an attach target, since the values become arguments.
     assertPodRef({ ...selection, container: 'placeholder' });
     return parsePodInfo(
-      await this.runWith(selection, [
+      await this.runWith(selection, 'get pod', [
         ...kubectlBaseArgs({ context: selection.context, namespace: selection.namespace }),
         'get',
         'pod',

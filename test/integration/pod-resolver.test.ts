@@ -412,6 +412,30 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       expect(launched.every((mode) => JSON.stringify(mode) === JSON.stringify(wsl))).toBe(true);
     });
 
+    it('fixes a target without a context to the current one for this connection', async () => {
+      await stub.set('current-context', 'other');
+      const { resolver, logger } = createResolver();
+      const { context: _context, ...withoutContext } = ref;
+      await resolver.resolve(encodePodAuthority(withoutContext));
+
+      const execs = (await stub.calls()).filter((args) => args.includes('exec'));
+      expect(execs.length).toBeGreaterThan(0);
+      expect(execs.every((args) => args.includes('--context=other'))).toBe(true);
+      expect(logger.entries.map((e) => e.message)).toContain(
+        'The target names no context; using the current one, other',
+      );
+    });
+
+    it('refuses a target without a context when there is no current one', async () => {
+      const { resolver } = createResolver();
+      const { context: _context, ...withoutContext } = ref;
+      await expect(resolver.resolve(encodePodAuthority(withoutContext))).rejects.toMatchObject({
+        kind: 'NotAvailable',
+        message: expect.stringMatching(/This window names no Kubernetes context/),
+      });
+      expect((await stub.calls()).some((args) => args.includes('pod'))).toBe(false);
+    });
+
     it('rejects an invalid authority without calling kubectl', async () => {
       const { resolver } = createResolver();
       await expect(resolver.resolve('k8s-pod+nothex')).rejects.toMatchObject({

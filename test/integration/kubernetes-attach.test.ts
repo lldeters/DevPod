@@ -156,6 +156,35 @@ describe('attach from the Kubernetes explorer', () => {
     await expect(attachToPod(dependencies({ target: clickedPod }), {})).rejects.toThrow(/NotFound/);
   });
 
+  it('refuses when kubectl has no current context, which the explorer would show', async () => {
+    await stub.unset('current-context');
+    await stub.set('contexts', 'ctx-a\nctx-b\n');
+    await expect(attachToPod(dependencies({ target: clickedPod }), {})).rejects.toThrow(
+      /no current Kubernetes context.*vs-kubernetes\.use-wsl/s,
+    );
+    expect(openedWindow()).toBeUndefined();
+    expect((await stub.calls()).some((args) => args.includes('pod'))).toBe(false);
+  });
+
+  it('says that no kubeconfig was found when kubectl has no context at all', async () => {
+    await stub.unset('current-context');
+    await expect(attachToPod(dependencies({ target: clickedPod }), {})).rejects.toThrow(
+      /kubectl found no Kubernetes context in its kubeconfig/,
+    );
+    expect(openedWindow()).toBeUndefined();
+  });
+
+  it('logs which kubectl and kubeconfig it uses, and where WSL was turned on', async () => {
+    const deps = dependencies({ target: clickedPod });
+    deps.wslSetting = () => 'vs-kubernetes.use-wsl';
+    await attachToPod(deps, {});
+    const lines = (deps.logger as MemoryLogger).entries.map((entry) => entry.message);
+    expect(lines).toContain(
+      `Attach (Kubernetes explorer): kubectl "${stub.path}", kubeconfig kubectl's default ` +
+        '(WSL from "vs-kubernetes.use-wsl")',
+    );
+  });
+
   it('records that kubectl runs in WSL, so the window keeps using it there', async () => {
     const deps = dependencies({ target: clickedPod });
     const wsl = { distro: 'Ubuntu-24.04' };
@@ -240,6 +269,69 @@ describe('attach from the command palette', () => {
     await attachToPod(dependencies());
 
     expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').namespace).toBe('dev');
+  });
+
+  it('offers every context when none is current, and records the choice', async () => {
+    await stub.unset('current-context');
+    await stub.set('contexts', 'ctx-a\nctx-b\n');
+    await stub.set('namespaces.json', listJson(['dev']));
+    await stub.set('pods.json', listJson(['mypod']));
+    state.quickPickSequence = [1, 0, 0]; // context "ctx-b", namespace "dev", pod "mypod"
+
+    await attachToPod(dependencies());
+
+    expect(state.quickPickTitles[0]).toBe('Kubernetes context (none is current)');
+    expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').context).toBe('ctx-b');
+  });
+
+  it('uses the only context when none is current, without asking', async () => {
+    await stub.unset('current-context');
+    await stub.set('contexts', 'only\n');
+    await stub.set('namespaces.json', listJson(['dev']));
+    await stub.set('pods.json', listJson(['mypod']));
+    state.quickPickSequence = [0, 0];
+
+    await attachToPod(dependencies());
+
+    expect(state.quickPickCalls).toHaveLength(2); // namespace and pod only
+    expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').context).toBe('only');
+    const listings = (await stub.calls()).filter((args) => args.includes('get'));
+    expect(listings.every((args) => args.includes('--context=only'))).toBe(true);
+  });
+
+  it('treats a current context that is not listed like none', async () => {
+    await stub.set('current-context', 'deleted');
+    await stub.set('contexts', 'only\n');
+    await stub.set('namespaces.json', listJson(['dev']));
+    await stub.set('pods.json', listJson(['mypod']));
+    state.quickPickSequence = [0, 0];
+    await attachToPod(dependencies());
+    expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').context).toBe('only');
+  });
+
+  it('says that no kubeconfig was found, naming the configured one, before asking anything', async () => {
+    await stub.unset('current-context');
+    state.settings['dev.containers.kubeconfigPath'] = '/home/me/.kube/missing';
+    await expect(attachToPod(dependencies())).rejects.toThrow(
+      'kubectl found no Kubernetes context in "/home/me/.kube/missing": the file does not exist ' +
+        'or lists no contexts. Set "dev.containers.kubeconfigPath" to your kubeconfig.',
+    );
+    expect(state.quickPickCalls).toHaveLength(0);
+    expect(state.inputBoxCount).toBe(0);
+    expect((await stub.calls()).some((args) => args.includes('namespaces'))).toBe(false);
+  });
+
+  it('reports a failure to list namespaces that is not a refusal, instead of asking', async () => {
+    await stub.set('contexts', 'kind-test\n');
+    await stub.set(
+      'namespaces.error',
+      'The connection to the server 127.0.0.1:6443 was refused - did you specify the right host or port?',
+    );
+    await expect(attachToPod(dependencies())).rejects.toThrow(
+      /kubectl get namespaces failed: The connection to the server 127\.0\.0\.1:6443 was refused/,
+    );
+    expect(state.inputBoxCount).toBe(0);
+    expect(openedWindow()).toBeUndefined();
   });
 
   it('stops quietly when the user cancels a question', async () => {

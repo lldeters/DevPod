@@ -47,7 +47,10 @@ export interface KubectlStub {
   readonly dir: string;
   /** Every invocation so far, as argument lists. */
   calls(): Promise<string[][]>;
-  /** Sets a canned answer: pod.json, pods.json, namespaces.json, contexts, current-context. */
+  /**
+   * Sets a canned answer: pod.json, pods.json, namespaces.json, contexts, current-context, or
+   * namespaces.error (the message listing namespaces fails with).
+   */
   set(name: string, content: string): Promise<void>;
   /** Removes one canned answer, so that query fails like a kubectl error. */
   unset(name: string): Promise<void>;
@@ -74,12 +77,16 @@ if (has('exec') && separator >= 0) {
   });
   child.on('error', (error) => fail(String(error)));
   child.on('exit', (code) => process.exit(code === null ? 1 : code));
+} else if (args.some((arg) => arg.includes('{.current-context}'))) {
+  // \`config view\` prints nothing (and succeeds) when there is no current context or kubeconfig.
+  process.stdout.write(read('current-context') ?? '');
 } else if (has('current-context')) {
-  const value = read('current-context');
-  value === undefined ? fail('error: current-context is not set') : process.stdout.write(value + '\\n');
+  fail('the extension reads the current context with config view');
 } else if (has('get-contexts')) {
   process.stdout.write(read('contexts') ?? '');
 } else if (has('namespaces')) {
+  const error = read('namespaces.error');
+  if (error !== undefined) fail(error);
   const value = read('namespaces.json');
   value === undefined ? fail('Error from server (Forbidden): namespaces is forbidden') : process.stdout.write(value);
 } else if (has('pods')) {
@@ -125,6 +132,7 @@ export async function createKubectlStub(root: string): Promise<KubectlStub> {
         'namespaces.json',
         'contexts',
         'current-context',
+        'namespaces.error',
       ]) {
         await rm(path.join(dir, name), { force: true });
       }

@@ -108,6 +108,15 @@ describe.skipIf(!enabled)('Kubernetes pod end to end', () => {
     expect(() => checkContainerRunning(info, 'nope')).toThrowError(/no container "nope"/);
   });
 
+  it('reports no current context and no contexts when kubectl finds no kubeconfig', async () => {
+    const empty = new Kubectl(
+      () => ({ kubectl: 'kubectl' }),
+      () => ({ kubeconfig: path.join(root, 'no-such-kubeconfig') }),
+    );
+    expect(await empty.currentContext()).toBeUndefined();
+    expect(await empty.contexts()).toEqual([]);
+  });
+
   it('reports a pod that does not exist', async () => {
     await expect(client.pod({ ...ref, pod: 'does-not-exist' })).rejects.toThrow(
       /NotFound|not found/i,

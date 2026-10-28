@@ -136,14 +136,22 @@ often set up only inside WSL. With `dev.containers.kubectlInWSL` (and optionally
 `dev.containers.kubectlWSLDistro`), the extension runs kubectl in that distribution for listing,
 attaching, the connection and port forwarding. If you leave the setting unset, the Kubernetes
 extension's `vs-kubernetes.use-wsl` decides, so _Attach to Kiro_ uses the same kubectl as its
-explorer.
+explorer. That extension always uses the **default** distribution: leave
+`dev.containers.kubectlWSLDistro` empty, or set it to the default one, so both see the same
+clusters.
 
 - `kubectl` is found through the `PATH` of your login shell, which is read from the login profile
   (`~/.profile`, `~/.bash_profile` or `~/.zprofile`), **not** from `~/.bashrc`. The same goes for
   `KUBECONFIG`. Put the lines that add kubectl or krew (`~/.krew/bin`) to `PATH` there, or set
   `dev.containers.kubectlPath` to the Linux path of kubectl. A Windows path is refused in this mode.
+- kubectl reads the kubeconfig **inside the distribution**, as its default user: `~/.kube/config`,
+  or the file `KUBECONFIG` names in the login profile. If your kubeconfig is on Windows, set
+  `dev.containers.kubeconfigPath` to it. A distribution created with `wsl --import` runs as `root`
+  unless it has a default user.
 - `dev.containers.kubeconfigPath` may be a Linux path, `~/...` (the Linux home directory) or a
   Windows path such as `C:\Users\me\.kube\config`, which is converted with `wslpath`.
+- `dev.containers.kubectlWSLDistro` must be a name that `wsl.exe --list --verbose` shows (case does
+  not matter, dots and dashes do), for example `Ubuntu-24.04` or `Ubuntu`.
 - A window that was attached this way keeps running kubectl in that distribution, even if the
   settings change later.
 - Sign-ins that open a browser (OIDC) need a way to open one from WSL, for example `wslu`. kubectl's

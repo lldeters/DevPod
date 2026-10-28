@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { DevContainerError, errorMessage } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
+import { noContextError, noCurrentContextError } from '../core/k8s/kubectl';
 import type { Kubectl, KubectlScope, PodInfo } from '../core/k8s/kubectl';
 import { isValidWslDistro } from '../core/k8s/launcher';
 import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
@@ -99,10 +100,7 @@ export function effectiveKubeconfig(wsl?: WslSelection): string | undefined {
 export function effectiveWsl(
   platform: NodeJS.Platform = process.platform,
 ): WslSelection | undefined {
-  if (platform !== 'win32') return undefined;
-  const own = userValue<boolean>('dev.containers', 'kubectlInWSL');
-  const enabled = own ?? userValue<unknown>(undefined, 'vs-kubernetes.use-wsl') === true;
-  if (!enabled) return undefined;
+  if (wslSetting(platform) === undefined) return undefined;
   const distro = readSettings().kubectlWSLDistro;
   if (distro !== undefined && !isValidWslDistro(distro)) {
     throw new DevContainerError(
@@ -111,6 +109,18 @@ export function effectiveWsl(
     );
   }
   return distro === undefined ? {} : { distro };
+}
+
+/** The setting that turns on kubectl in WSL, or `undefined` when kubectl runs directly. */
+export function wslSetting(
+  platform: NodeJS.Platform = process.platform,
+): 'dev.containers.kubectlInWSL' | 'vs-kubernetes.use-wsl' | undefined {
+  if (platform !== 'win32') return undefined;
+  const own = userValue<boolean>('dev.containers', 'kubectlInWSL');
+  if (own !== undefined) return own ? 'dev.containers.kubectlInWSL' : undefined;
+  return userValue<unknown>(undefined, 'vs-kubernetes.use-wsl') === true
+    ? 'vs-kubernetes.use-wsl'
+    : undefined;
 }
 
 /** What the listing queries and a new attach use: the configured kubeconfig and WSL mode. */
@@ -162,6 +172,8 @@ export interface AttachDependencies {
   /** False (after guiding the user) when the proposed API that remote windows need is not enabled. */
   ensureRemoteSupport: () => Promise<boolean>;
   resolveTarget: (target: unknown) => Promise<ExplorerTarget | undefined>;
+  /** Which setting turned on kubectl in WSL, for the log. */
+  wslSetting?: () => string | undefined;
 }
 
 interface Choice<T> extends vscode.QuickPickItem {
@@ -187,6 +199,8 @@ async function chooseNamespace(
       );
     }
   } catch (error) {
+    // Ordinary users may not list namespaces; anything else (no cluster, no access) is reported.
+    if (!/forbidden/i.test(errorMessage(error))) throw error;
     deps.logger.log('info', `Could not list namespaces (${errorMessage(error)}); asking instead.`);
   }
   return nonEmpty(
@@ -204,11 +218,16 @@ async function chooseInteractively(
 ): Promise<{ context: string | undefined; namespace: string; pod: string } | undefined> {
   const current = await deps.kubectl.currentContext();
   const contexts = await deps.kubectl.contexts();
-  let context = current;
+  if (contexts.length === 0) {
+    throw noContextError(deps.kubectl.scope());
+  }
+  // Without a current context (or one that is not listed), kubectl would fall back to
+  // localhost:8080: a context is always named, so the window is fixed to a cluster.
+  let context = current !== undefined && contexts.includes(current) ? current : contexts[0];
   if (contexts.length > 1) {
     const ordered = [...contexts].sort((a, b) => Number(b === current) - Number(a === current));
     const chosen = await pick(
-      'Kubernetes context',
+      context === current ? 'Kubernetes context' : 'Kubernetes context (none is current)',
       ordered.map((name) => ({
         label: name,
         ...(name === current ? { description: 'current' } : {}),
@@ -275,10 +294,22 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
     void vscode.window.showInformationMessage('Select a pod to attach to.');
     return;
   }
+  const source = deps.wslSetting?.();
+  deps.logger.log(
+    'info',
+    `Attach (${explorer ? 'Kubernetes explorer' : 'command palette'}): ${deps.kubectl.describe()}` +
+      (source ? ` (WSL from "${source}")` : ''),
+  );
   if (explorer?.kind === 'pod') {
     // The explorer lists the pods of the current context, so that is the cluster to use. It is
     // fixed in the connection, so switching contexts later does not redirect an open window.
     context = await deps.kubectl.currentContext();
+    if (context === undefined) {
+      const scope = deps.kubectl.scope();
+      throw (await deps.kubectl.contexts()).length === 0
+        ? noContextError(scope)
+        : noCurrentContextError(scope, 'explorer');
+    }
     namespace = explorer.namespace;
     podName = explorer.name;
   } else {

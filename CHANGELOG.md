@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 (2026-10-28)
 
 - **Several kubeconfig files**: `dev.containers.kubeconfigPath` (and the Kubernetes extension's
   `vs-kubernetes.kubeconfig`) may list several files like `KUBECONFIG` (`;` on Windows and for

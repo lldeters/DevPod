@@ -24,9 +24,11 @@ steps to reproduce and the impact you see.
   `initializeCommand` on this machine, or kubectl with the kubeconfig it names.
 - This machine's Kiro sign-in is copied into a container or pod only after the user agrees in a
   dialog (default, `dev.containers.shareKiroLogin: "ask"`), and only if the container has none.
-- The IDE server is downloaded over `https` only (or from a file inside the container). In the
-  fallback folder used when the home directory is not writable, the server is installed only if
-  that folder belongs to the user.
+- The IDE server is downloaded over `https` only (or from a file inside the container), also after
+  redirects. In the fallback folder used when the home directory is not writable, the server is
+  installed only if that folder belongs to the user, and in the home directory only if the server's
+  own folder does (someone else could have created it where others may write to the home directory,
+  as to an `emptyDir` volume).
 - Values of environment and build arguments, and the values of environment variables whose names
   look like secrets (for example `NPM_TOKEN`), are masked in everything logged or shown from the
   Dev Container CLI, so a log can be shared. Show Diagnostics replaces the home directory by `~`.

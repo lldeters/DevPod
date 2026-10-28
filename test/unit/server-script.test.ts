@@ -417,18 +417,35 @@ cp "$WGET_SOURCE" "$out"
       expect(parseInstallResult(result.stdout).port).toBe(45678);
     });
 
-    it.each(['http://mirror.example/s.tgz', 'ftp://mirror.example/s.tgz'])(
-      'refuses a download that was redirected to %s',
-      async (target) => {
-        const result = await install(
-          `  HTTP/1.1 302 Found\n  Location: ${target}\r\n  HTTP/1.1 200 OK`,
-        );
-        expect(() => parseInstallResult(result.stdout)).toThrowError(
-          /redirected to an address that is not https/,
-        );
-        await expect(stat(path.join(home, '.test-server', 'bin', commit))).rejects.toThrow();
+    it.each([
+      'http://mirror.example/s.tgz',
+      'ftp://mirror.example/s.tgz',
+      // BusyBox wget reads an address without a scheme as http://
+      'mirror.example/s.tgz',
+      's.tgz',
+    ])('refuses a download that was redirected to %s', async (target) => {
+      const result = await install(
+        `  HTTP/1.1 302 Found\n  Location: ${target}\r\n  HTTP/1.1 200 OK`,
+      );
+      expect(() => parseInstallResult(result.stdout)).toThrowError(
+        /redirected to an address that is not https/,
+      );
+      await expect(stat(path.join(home, '.test-server', 'bin', commit))).rejects.toThrow();
+    });
+  });
+
+  it('refuses a wget that does not show the responses on stderr (like Wget2)', async () => {
+    const result = await runProcess('/bin/sh', ['-s'], {
+      stdin: buildInstallScript({ ...options(), downloadUrl: 'https://example.invalid/s.tgz' }),
+      env: {
+        PATH: await toolbox(TOOLS, {
+          wget: '#!/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -O) cp "$WGET_SOURCE" "$2"; shift 2 ;; *) shift ;; esac; done\n',
+        }),
+        HOME: home,
+        WGET_SOURCE: archive,
       },
-    );
+    });
+    expect(() => parseInstallResult(result.stdout)).toThrowError(/install curl/);
   });
 
   it('leaves a setup lock alone that another run took over meanwhile', async () => {
@@ -445,23 +462,28 @@ cp "$WGET_SOURCE" "$out"
     expect(await readFile(owner, 'utf8')).toBe('1 1\n');
   });
 
-  it('uses the private temporary folder when everyone may write to the home directory', async () => {
-    const tmp = path.join(work, 'tmp');
-    const shared = path.join(work, 'shared-home');
-    await mkdir(tmp);
-    await mkdir(shared);
-    await chmod(shared, 0o1777);
-    const env = { ...process.env, HOME: shared, TMPDIR: tmp };
-    const detected = await runProcess('sh', ['-s'], { stdin: detectPlatformScript, env });
-    expect(parsePlatform(detected.stdout).home).toBe(fallbackOf(tmp));
-    const result = await runProcess('sh', ['-s'], { stdin: buildInstallScript(options()), env });
-    const root = path.join(fallbackOf(tmp), '.test-server');
-    expect(parseInstallResult(result.stdout).serverDir).toBe(path.join(root, 'bin', commit));
-    process.kill(
-      Number((await readFile(path.join(root, `server-${commit}.pid`), 'utf8')).trim()),
-      'SIGKILL',
+  it('installs in a home directory everyone may write to, such as an emptyDir volume', async () => {
+    await chmod(home, 0o777);
+    const info = parseInstallResult((await run(buildInstallScript(options()))).stdout);
+    expect(info.serverDir).toBe(path.join(home, '.test-server', 'bin', commit));
+  });
+
+  it('refuses a server folder that belongs to another user', async () => {
+    // A stand-in for stat that reports another owner, as for a folder someone else created first.
+    const stat = '#!/bin/sh\necho 4242\n';
+    const result = await runProcess('/bin/sh', ['-s'], {
+      stdin: buildInstallScript(options()),
+      env: {
+        PATH: await toolbox([...TOOLS.filter((tool) => tool !== 'stat'), 'curl'], { stat }),
+        HOME: home,
+      },
+    });
+    expect(() => parseInstallResult(result.stdout)).toThrowError(
+      /belongs to another user \(uid 4242\)/,
     );
-    await expect(stat(path.join(shared, '.test-server'))).rejects.toThrow();
+    await expect(
+      readFile(path.join(home, '.test-server', `server-${commit}.pid`)),
+    ).rejects.toThrow();
   });
 
   it('starts no server without a connection token', async () => {

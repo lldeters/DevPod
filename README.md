@@ -80,7 +80,9 @@ This extension reads the build information (`commit`, `quality`, `version`,
 server from `serverDownloadUrlTemplate` of `product.json`, or from the setting of the same name.
 Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${os}` (`linux` or `alpine`),
 `${arch}` (`x64`, `arm64`, `armhf`). Unknown placeholders are rejected. The URL must use `https://`
-(or `file://` for an archive inside the container); with `curl`, redirects must stay on `https`.
+(or `file://` for an archive inside the container), and redirects must stay on `https`. With `wget`
+instead of `curl`, the redirects are checked in its output; a `wget` that does not show them (such
+as Wget2) is refused, so install `curl` there.
 
 ## Usage
 
@@ -125,7 +127,8 @@ in the original extension.
 What the pod needs: a running container with `sh`, `curl` or `wget`, and `tar`, on Linux x64 or
 arm64. The IDE server is installed in the user's home directory, or, if that is not writable, in
 the private folder `devcontainers-kiro-<uid>` of `$TMPDIR` (or `/tmp`); that folder is refused unless
-it is a directory the user owns. It is not part of the pod's image, so it is installed again after
+it is a directory the user owns, and the server's own folder in the home directory must belong to
+the user too. It is not part of the pod's image, so it is installed again after
 the pod is recreated.
 Images without a shell (for example distroless images) cannot be used. `kubectl` must be installed
 and able to reach the cluster; the path and kubeconfig set for the Kubernetes extension in your user

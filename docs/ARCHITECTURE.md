@@ -42,8 +42,10 @@ src/ui/       Commands, status bar item, reopen prompt, setup of argv.json, logg
    recognized by its PID **and** start time (`/proc/<pid>/stat`), so a PID that another process got
    after a restart is not taken for it. Runs for the same folder are serialized with a lock
    directory (`setup.lock`, owner recorded, taken over when the owner is gone), since two windows
-   may connect at once. The download must be `https` (or `file`); `curl` also refuses redirects to
-   anything but `https`.
+   may connect at once. The download must be `https` (or `file`), also after redirects: `curl`
+   refuses others (`--proto-redir`); with `wget`, its response headers (`-S`) are checked and a
+   `Location` that is neither `https://` nor a path fails the download, and a `wget` that shows no
+   headers on stderr (Wget2) is refused.
 4. **Connection**: each connection spawns `docker exec -i … <container node> -e <bridge> <port>`
    which relays stdio to the server's loopback port. No port is published on the host. The bridge
    exits only once stdout has taken everything, so the end of a stream is not cut off.
@@ -146,7 +148,9 @@ exec -i --container=... pod -- ...` for a pod.
    `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`), which is used only if it is a real directory
    the user owns (then set to mode 700): anyone could have created that predictable name first,
    with a server launcher of their own. The detection script and the install script share this
-   rule (`CHOOSE_BASE_SCRIPT`). Pods often run as a user without a home directory.
+   rule (`CHOOSE_BASE_SCRIPT`). Pods often run as a user without a home directory. A home directory
+   that others may write to is used (an `emptyDir` volume is 0777), but the server's own folder in
+   it must belong to the user, or the install script stops.
 
 6. **kubectl in WSL** (Windows, `src/core/k8s/launcher.ts`). A `KubectlLauncher` says how kubectl
    is started: directly, or with `wsl.exe` from `%SystemRoot%\System32` as

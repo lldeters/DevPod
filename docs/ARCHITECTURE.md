@@ -150,14 +150,20 @@ exec -i --container=... pod -- ...` for a pod.
 
 6. **kubectl in WSL** (Windows, `src/core/k8s/launcher.ts`). A `KubectlLauncher` says how kubectl
    is started: directly, or with `wsl.exe` from `%SystemRoot%\System32` as
-   `wsl.exe [--distribution D] --cd ~ --exec /bin/sh -c <wrapper> kubectl <kubectl> <args...>`. `--exec` matters:
+   `wsl.exe [--distribution D] --cd ~ --exec /bin/sh -c <wrapper> kubectl <windows> <kubectl> <args...>`. `--exec` matters:
    without it wsl.exe hands the command line to the distribution's default shell, which would
    interpret the arguments, and the bridge passes a Node.js script as one. The fixed wrapper reads
    `PATH` and `KUBECONFIG` from `$SHELL -l` with that shell's stdin, stdout and stderr detached (a
    profile can neither print into the protocol nor read from it; markers separate the values from
    any output), expands `~/` in the kubectl path, turns a leading `--kubeconfig=` (a list separated
    by `;`) into `KUBECONFIG` with `~/` expanded and Windows drive paths converted by `wslpath`, and
-   `exec`s kubectl. Before that, `kubectlProcess` turns Windows paths into the distribution itself
+   `exec`s kubectl. Unless `<windows>` is `-` (`dev.containers.kubectlWSLBrowser: wsl`), it is
+   `%SystemRoot%`: the wrapper writes a fixed `xdg-open` shim to `~/.cache/devcontainers-kiro/bin`
+   (only when it is missing or differs), puts that folder first in `PATH` and sets `BROWSER` to it.
+   The shim hands web addresses to `rundll32.exe url.dll,FileProtocolHandler` after a `cd` into the
+   Windows folder (a Windows program started from a Linux directory can fail with "Invalid
+   argument"), and anything else to the `xdg-open` of the original `PATH`. Without `rundll32.exe`
+   or a writable folder, WSL opens web pages as before. Before that, `kubectlProcess` turns Windows paths into the distribution itself
    (`\\wsl.localhost\<distro>\...`) into Linux paths and refuses ones into another distribution.
    Natively, a list is passed as `KUBECONFIG` too, since `--kubeconfig` takes a single file; every
    file of a list is validated on its own (absolute, no network share). The pod authority records the WSL selection

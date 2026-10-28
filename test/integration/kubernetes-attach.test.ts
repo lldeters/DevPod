@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as vscode from 'vscode';
 import { Kubectl } from '../../src/core/k8s/kubectl';
+import { windowsRoot } from '../../src/core/k8s/launcher';
 import { decodePodAuthority } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
@@ -430,12 +431,32 @@ describe('which kubectl and kubeconfig are used', () => {
 
   it('starts kubectl in WSL from its Linux path, or from the login PATH', () => {
     const wsl = { distro: 'Ubuntu' };
+    const windowsBrowser = windowsRoot();
     state.settings['vscode-kubernetes.kubectl-path'] = 'C:\\tools\\kubectl.exe';
-    expect(kubectlLauncher(wsl, 'win32')).toEqual({ kubectl: 'kubectl', wsl }); // not the Windows one
+    // not the Windows one
+    expect(kubectlLauncher(wsl, 'win32')).toEqual({ kubectl: 'kubectl', wsl, windowsBrowser });
     state.settings['dev.containers.kubectlPath'] = '/usr/local/bin/kubectl';
-    expect(kubectlLauncher(wsl, 'win32')).toEqual({ kubectl: '/usr/local/bin/kubectl', wsl });
+    expect(kubectlLauncher(wsl, 'win32')).toEqual({
+      kubectl: '/usr/local/bin/kubectl',
+      wsl,
+      windowsBrowser,
+    });
     state.settings['dev.containers.kubectlPath'] = '~/bin/kubectl';
-    expect(kubectlLauncher(wsl, 'win32')).toEqual({ kubectl: '~/bin/kubectl', wsl });
+    expect(kubectlLauncher(wsl, 'win32')).toEqual({
+      kubectl: '~/bin/kubectl',
+      wsl,
+      windowsBrowser,
+    });
+  });
+
+  it('opens sign-in pages of kubectl in WSL in the Windows browser unless set to WSL', () => {
+    expect(kubectlLauncher({}, 'win32').windowsBrowser).toBe(windowsRoot());
+    state.settings['dev.containers.kubectlWSLBrowser'] = 'wsl';
+    expect(kubectlLauncher({}, 'win32')).toEqual({ kubectl: 'kubectl', wsl: {} });
+    state.settings['dev.containers.kubectlWSLBrowser'] = 'windows';
+    expect(kubectlLauncher({}, 'win32').windowsBrowser).toBe(windowsRoot());
+    // the setting only concerns WSL
+    expect(kubectlLauncher(undefined, 'win32')).not.toHaveProperty('windowsBrowser');
   });
 
   it('reports a Windows kubectl path in WSL mode instead of running it', () => {

@@ -5,12 +5,13 @@
 //
 // The wrapper's logic is covered with a local sh in test/unit/wsl.test.ts. This checks what only
 // Windows shows: that every argument survives the Windows command line and wsl.exe unchanged, that
-// stdin and stdout pass through byte for byte and the end of stdin arrives, and that `wslpath`,
-// `--cd ~` and the user's login shell behave as the wrapper expects.
+// stdin and stdout pass through byte for byte and the end of stdin arrives, that `wslpath`,
+// `--cd ~` and the user's login shell behave as the wrapper expects, and that a Windows program
+// starts from the folder the browser shim uses.
 import { spawn, spawnSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Kubectl } from '../../src/core/k8s/kubectl';
-import { kubectlProcess, wslExecutable } from '../../src/core/k8s/launcher';
+import { WSL_BROWSER_SHIM, kubectlProcess, wslExecutable } from '../../src/core/k8s/launcher';
 import type { KubectlLauncher, WslSelection } from '../../src/core/k8s/launcher';
 import { BRIDGE_SCRIPT } from '../../src/core/server/script';
 
@@ -143,6 +144,32 @@ describe.skipIf(!enabled)('kubectl in WSL end to end', () => {
       `${home}/.kube/iat.yaml:${home}/.kube/prd.yaml:${home}/.kube/dev.yaml`,
       'get',
     ]);
+  });
+
+  it('hands web pages to the Windows browser through a shim that starts from the Windows folder', async () => {
+    // A credential plugin that reports what it would open web pages with, instead of opening one.
+    inWsl(
+      'cat > "$HOME/dck-e2e/bin/browser-check" && chmod +x "$HOME/dck-e2e/bin/browser-check"',
+      '#!/bin/sh\n' +
+        'printf \'%s\\0\' "$(command -v xdg-open)" "${BROWSER-}" "${DEVCONTAINERS_KIRO_WINDOWS-}"\n' +
+        // what the shim does before rundll32.exe: start a Windows program from the Windows folder
+        'if [ -n "${DEVCONTAINERS_KIRO_WINDOWS-}" ]; then cd "$DEVCONTAINERS_KIRO_WINDOWS" && ' +
+        '"$DEVCONTAINERS_KIRO_WINDOWS/System32/cmd.exe" /d /c echo windows-ok; fi\n',
+    );
+    const windowsBrowser = process.env['SystemRoot'] ?? 'C:\\Windows';
+    const result = await launch({ kubectl: 'browser-check', wsl, windowsBrowser }, []);
+    expect(result.code, result.stderr).toBe(0);
+    const [xdgOpen, browser, windows, rest] = result.stdout.toString('utf8').split('\0');
+    const shim = `${home}/.cache/devcontainers-kiro/bin/xdg-open`;
+    expect(xdgOpen).toBe(shim);
+    expect(browser).toBe(shim);
+    expect(windows).toMatch(/^\/.+\/c\/windows$/i);
+    expect(rest?.trim()).toBe('windows-ok');
+    expect(inWsl(`cat "${shim}"`)).toBe(`${WSL_BROWSER_SHIM}\n`);
+
+    const unchanged = await launch({ kubectl: 'browser-check', wsl }, []);
+    expect(unchanged.code, unchanged.stderr).toBe(0);
+    expect(unchanged.stdout.toString('utf8').split('\0').slice(0, 3)).not.toContain(shim);
   });
 
   it('starts in the Linux home directory', async () => {

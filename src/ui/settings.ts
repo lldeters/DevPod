@@ -6,6 +6,9 @@ import * as vscode from 'vscode';
 /** Whether this machine's Kiro sign-in is copied into containers and pods. */
 export type ShareKiroLogin = 'ask' | 'always' | 'never';
 
+/** Where web pages that kubectl in WSL opens (sign-ins) are shown. */
+export type KubectlWSLBrowser = 'windows' | 'wsl';
+
 export interface Settings {
   dockerPath: string;
   dockerComposePath: string | undefined;
@@ -16,6 +19,7 @@ export interface Settings {
   kubectlPath: string | undefined;
   kubeconfigPath: string | undefined;
   kubectlWSLDistro: string | undefined;
+  kubectlWSLBrowser: KubectlWSLBrowser;
   shareKiroLogin: ShareKiroLogin;
 }
 
@@ -43,6 +47,7 @@ export function readSettings(): Settings {
     kubectlPath: nonEmpty(config.get<string>('kubectlPath')),
     kubeconfigPath: nonEmpty(config.get<string>('kubeconfigPath')),
     kubectlWSLDistro: nonEmpty(config.get<string>('kubectlWSLDistro')),
+    kubectlWSLBrowser: config.get<unknown>('kubectlWSLBrowser') === 'wsl' ? 'wsl' : 'windows',
     shareKiroLogin: shareKiroLogin(config.get<unknown>('shareKiroLogin')),
   };
 }

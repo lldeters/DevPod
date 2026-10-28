@@ -15,6 +15,12 @@ export interface KubectlLauncher {
   /** The kubectl program: a path or name on this machine, or, with `wsl`, inside WSL. */
   readonly kubectl: string;
   readonly wsl?: WslSelection;
+  /**
+   * With `wsl`: the Windows folder (`%SystemRoot%`) whose `rundll32.exe` opens the web pages that
+   * kubectl's credential plugins open, such as sign-ins, in the Windows default browser. Without
+   * it, WSL opens them (`xdg-open`).
+   */
+  readonly windowsBrowser?: string;
 }
 
 // The characters WSL allows in distribution names.
@@ -25,7 +31,32 @@ export function isValidWslDistro(name: string): boolean {
 }
 
 /**
- * The script `sh -c` runs inside WSL, as `sh -c <script> kubectl <kubectl> <args...>`:
+ * The `xdg-open` that kubectl in WSL finds first (and its `BROWSER`) when web pages go to the
+ * Windows browser: credential plugins open sign-in pages with `xdg-open` or `BROWSER`, which in WSL
+ * would start a Linux browser without the certificates and sign-ins of Windows. Web addresses go
+ * to `rundll32.exe url.dll,FileProtocolHandler`, the Windows default browser; anything else to the
+ * `xdg-open` kubectl would have found. Windows programs need a current directory that Windows can
+ * use, hence the `cd` into the Windows folder. Written to `~/.cache/devcontainers-kiro/bin`.
+ */
+export const WSL_BROWSER_SHIM = [
+  '#!/bin/sh',
+  '# Written by Dev Containers for Kiro for kubectl in WSL: web pages that credential plugins',
+  '# open, such as sign-ins, go to the Windows default browser; anything else to xdg-open.',
+  'case ${1-} in',
+  'http://* | https://*)',
+  '  w=${DEVCONTAINERS_KIRO_WINDOWS-}',
+  '  if [ -n "$w" ]; then',
+  '    cd "$w" && exec "$w/System32/rundll32.exe" url.dll,FileProtocolHandler "$1"',
+  '  fi',
+  '  ;;',
+  'esac',
+  'PATH=${DEVCONTAINERS_KIRO_PATH:-/usr/bin:/bin}',
+  'export PATH',
+  'exec xdg-open "$@"',
+].join('\n');
+
+/**
+ * The script `sh -c` runs inside WSL, as `sh -c <script> kubectl <windows> <kubectl> <args...>`:
  *
  * - It takes PATH and KUBECONFIG from the user's login shell, so kubectl and credential plugins
  *   set up in the login profile are found. The profile runs with stdin, stdout and stderr detached:
@@ -35,6 +66,9 @@ export function isValidWslDistro(name: string): boolean {
  * - It turns a leading `--kubeconfig=` argument (kubectlBaseArgs puts it first), a list of files
  *   separated by `;`, into KUBECONFIG, which unlike `--kubeconfig` takes several files: `~/` is
  *   expanded and Windows paths are converted with `wslpath`.
+ * - Unless `<windows>` is `-`, it is the Windows folder (`C:\Windows`), and web pages that kubectl
+ *   opens go to the Windows browser: WSL_BROWSER_SHIM is written (once) and comes first in PATH,
+ *   and is BROWSER. Without `rundll32.exe` there, or when the file cannot be written, WSL decides.
  * - It runs kubectl with every other argument unchanged.
  */
 export const WSL_KUBECTL_SCRIPT = [
@@ -42,13 +76,22 @@ export const WSL_KUBECTL_SCRIPT = [
   'case $e in *@dck@*@dck@*) v=${e##*@dck@}; e=${e%@dck@*}; p=${e##*@dck@}; ' +
     'if [ -n "$p" ]; then PATH=$p; export PATH; fi; ' +
     'if [ -n "$v" ]; then KUBECONFIG=$v; export KUBECONFIG; fi;; esac',
-  'k=$1',
-  'shift',
+  'b=$1',
+  'k=$2',
+  'shift 2',
   'case $k in "~/"*) k=$HOME/${k#"~/"};; esac',
   'case ${1-} in --kubeconfig=*) v=${1#--kubeconfig=}; shift; l=; while [ -n "$v" ]; do ' +
     'f=${v%%;*}; if [ "$f" = "$v" ]; then v=; else v=${v#*;}; fi; ' +
     'case $f in "~/"*) f=$HOME/${f#"~/"};; [A-Za-z]:*) f=$(wslpath -u "$f") || exit 1;; esac; ' +
     'if [ -n "$f" ]; then l=${l:+$l:}$f; fi; done; KUBECONFIG=$l; export KUBECONFIG;; esac',
+  'if [ "$b" != - ] && w=$(wslpath -u "$b" 2>/dev/null) && [ -x "$w/System32/rundll32.exe" ]; then ' +
+    'd=$HOME/.cache/devcontainers-kiro/bin; ' +
+    `s='${WSL_BROWSER_SHIM}'; ` +
+    'if { [ -x "$d/xdg-open" ] && [ "$(cat "$d/xdg-open")" = "$s" ]; } 2>/dev/null || ' +
+    '{ mkdir -p "$d" && printf \'%s\\n\' "$s" >"$d/.xdg-open.$$" && chmod 755 "$d/.xdg-open.$$" && ' +
+    'mv -f "$d/.xdg-open.$$" "$d/xdg-open" || { rm -f "$d/.xdg-open.$$"; false; }; } 2>/dev/null; then ' +
+    'DEVCONTAINERS_KIRO_WINDOWS=$w; DEVCONTAINERS_KIRO_PATH=$PATH; PATH=$d:$PATH; BROWSER=$d/xdg-open; ' +
+    'export DEVCONTAINERS_KIRO_WINDOWS DEVCONTAINERS_KIRO_PATH PATH BROWSER; fi; fi',
   'exec "$k" "$@"',
 ].join('; ');
 
@@ -93,9 +136,14 @@ function wslKubeconfig(value: string, wsl: WslSelection): string {
     .join(WSL_KUBECONFIG_SEPARATOR);
 }
 
+/** The Windows folder (`%SystemRoot%`), such as `C:\Windows`. */
+export function windowsRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return env['SystemRoot'] ?? 'C:\\Windows';
+}
+
 /** `wsl.exe` from the Windows system folder, not whatever PATH finds first. */
 export function wslExecutable(env: NodeJS.ProcessEnv = process.env): string {
-  return path.win32.join(env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'wsl.exe');
+  return path.win32.join(windowsRoot(env), 'System32', 'wsl.exe');
 }
 
 /**
@@ -141,6 +189,7 @@ export function kubectlProcess(
       '-c',
       WSL_KUBECTL_SCRIPT,
       'kubectl',
+      launcher.windowsBrowser ?? '-',
       launcher.kubectl,
       ...(kubeconfig === undefined
         ? args

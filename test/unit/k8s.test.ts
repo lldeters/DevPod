@@ -43,6 +43,12 @@ describe('pod authority', () => {
       ),
     ).toThrowError(/kubeconfig path/);
     expect(() => assertPodRef({ ...ref, kubeconfig: '/home/me/\u202Egifnoc' })).toThrow();
+    // Also the Unicode line and paragraph separators, also in one file of a list.
+    for (const separator of ['\u2028', '\u2029']) {
+      expect(() =>
+        assertPodRef({ ...ref, kubeconfig: `/a/config:/tmp/k${separator}Context-prod` }, ':'),
+      ).toThrow(/kubeconfig path/);
+    }
   });
 
   it('rejects a kubeconfig on a network share, but not one in WSL', () => {
@@ -206,6 +212,13 @@ describe('parsePodInfo', () => {
     expect(info.containers).toEqual([{ name: 'a', ready: false, running: false }]);
     expect(info.phase).toBe('Pending');
   });
+
+  it.each([['Evicted [x](command:y)'], [42], [undefined]])(
+    'takes a phase that is not one of the pod phases as Unknown (%j)',
+    (phase) => {
+      expect(parsePodInfo(podJson({ status: { phase } })).phase).toBe('Unknown');
+    },
+  );
 
   it.each(['', 'not json', '{}', '{"metadata":{}}'])('rejects %j', (input) => {
     expect(() => parsePodInfo(input)).toThrow();

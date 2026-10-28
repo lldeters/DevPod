@@ -23,8 +23,37 @@ export interface Settings {
   shareKiroLogin: ShareKiroLogin;
 }
 
-function nonEmpty(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
+/** What `inspect` returns at runtime; the local and remote parts are not in the API typings. */
+interface Inspection<T> {
+  readonly globalValue?: T;
+  readonly globalLocalValue?: T;
+  readonly globalRemoteValue?: T;
+}
+
+/**
+ * `section.key` as the user set it on this machine, or `undefined`. Settings that decide which
+ * programs run here, which kubeconfig is used or whether the Kiro sign-in is shared must come from
+ * neither a workspace nor the settings on the side of a container or pod. This extension declares
+ * them with scope `application`, but the IDE applies scopes only to the keys it knows: a section
+ * written as an object (`"dev.containers": { ... }`) passes that filter. So only the user's layer
+ * counts. In a remote window that layer also holds the remote side's settings, which can set a
+ * value and also erase one (`"dev.containers": null`), so this machine's value comes first there,
+ * and a value only the remote side has is not used.
+ */
+export function userValue<T>(section: string | undefined, key: string): T | undefined {
+  const inspected = vscode.workspace.getConfiguration(section).inspect<T>(key) as
+    Inspection<T> | undefined;
+  if (vscode.env.remoteName !== undefined) {
+    if (inspected?.globalLocalValue !== undefined) return inspected.globalLocalValue;
+    if (inspected?.globalRemoteValue !== undefined) return undefined;
+  }
+  // Also the user settings of the default profile, which hold the scope-`application` settings
+  // when another profile is active.
+  return inspected?.globalValue;
+}
+
+function nonEmpty(value: unknown): string | undefined {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed ? trimmed : undefined;
 }
 
@@ -35,19 +64,24 @@ function shareKiroLogin(value: unknown): ShareKiroLogin {
   return value === 'always' || value === 'never' ? value : 'ask';
 }
 
+function logLevel(value: unknown): Settings['logLevel'] {
+  return value === 'debug' || value === 'trace' ? value : 'info';
+}
+
 export function readSettings(): Settings {
   const config = vscode.workspace.getConfiguration('dev.containers');
+  const own = (key: string): unknown => userValue<unknown>('dev.containers', key);
   return {
-    dockerPath: nonEmpty(config.get<string>('dockerPath')) ?? 'docker',
-    dockerComposePath: nonEmpty(config.get<string>('dockerComposePath')),
-    devcontainerCliPath: nonEmpty(config.get<string>('devcontainerCliPath')),
-    logLevel: config.get<Settings['logLevel']>('logLevel') ?? 'info',
+    dockerPath: nonEmpty(own('dockerPath')) ?? 'docker',
+    dockerComposePath: nonEmpty(own('dockerComposePath')),
+    devcontainerCliPath: nonEmpty(own('devcontainerCliPath')),
+    logLevel: logLevel(config.get<unknown>('logLevel')),
     promptToReopen: config.get<boolean>('promptToReopen') ?? true,
-    serverDownloadUrlTemplate: nonEmpty(config.get<string>('serverDownloadUrlTemplate')),
-    kubectlPath: nonEmpty(config.get<string>('kubectlPath')),
-    kubeconfigPath: nonEmpty(config.get<string>('kubeconfigPath')),
-    kubectlWSLDistro: nonEmpty(config.get<string>('kubectlWSLDistro')),
-    kubectlWSLBrowser: config.get<unknown>('kubectlWSLBrowser') === 'wsl' ? 'wsl' : 'windows',
-    shareKiroLogin: shareKiroLogin(config.get<unknown>('shareKiroLogin')),
+    serverDownloadUrlTemplate: nonEmpty(own('serverDownloadUrlTemplate')),
+    kubectlPath: nonEmpty(own('kubectlPath')),
+    kubeconfigPath: nonEmpty(own('kubeconfigPath')),
+    kubectlWSLDistro: nonEmpty(own('kubectlWSLDistro')),
+    kubectlWSLBrowser: own('kubectlWSLBrowser') === 'wsl' ? 'wsl' : 'windows',
+    shareKiroLogin: shareKiroLogin(own('shareKiroLogin')),
   };
 }

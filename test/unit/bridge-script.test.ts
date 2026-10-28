@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import * as net from 'node:net';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BRIDGE_SCRIPT } from '../../src/core/server/script';
 
@@ -55,6 +58,50 @@ describe('BRIDGE_SCRIPT', () => {
       const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
       expect(code).toBe(0);
       expect(received).toBe(size);
+    }
+  });
+
+  it('passes on the end of the input when the first address of the host fails', async () => {
+    // As for localhost (::1, then 127.0.0.1) and a service that listens on IPv4 only. The lookup is
+    // slow, so the input has ended before the bridge is connected; Node forgets an end() given
+    // while it moves on to the next address.
+    const dir = await mkdtemp(path.join(tmpdir(), 'dck-bridge-'));
+    const preload = path.join(dir, 'two-addresses.cjs');
+    await writeFile(
+      preload,
+      `const dns = require('dns');
+const lookup = dns.lookup;
+dns.lookup = function (host, options, callback) {
+  if (host !== 'two-addresses.test') return lookup.apply(this, arguments);
+  const done = typeof options === 'function' ? options : callback;
+  const all = [{ address: '127.0.0.2', family: 4 }, { address: '127.0.0.1', family: 4 }];
+  setTimeout(() => (options && options.all ? done(null, all) : done(null, all[0].address, 4)), 200);
+};
+`,
+    );
+    try {
+      // Answers once the input has ended, like a service that reads its input to the end.
+      server = net.createServer({ allowHalfOpen: true }, (socket) => {
+        const chunks: Buffer[] = [];
+        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+        socket.on('end', () => socket.end(Buffer.concat(chunks)));
+      });
+      const port = await new Promise<number>((resolve) =>
+        server?.listen(0, '127.0.0.1', () => resolve((server?.address() as net.AddressInfo).port)),
+      );
+      const child = spawn(
+        process.execPath,
+        ['-r', preload, '-e', BRIDGE_SCRIPT, String(port), 'two-addresses.test'],
+        { stdio: ['pipe', 'pipe', 'inherit'] },
+      );
+      const chunks: Buffer[] = [];
+      child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+      const closed = new Promise<number | null>((resolve) => child.on('close', resolve));
+      child.stdin.end('request');
+      expect(await closed).toBe(0);
+      expect(Buffer.concat(chunks).toString('utf8')).toBe('request');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 

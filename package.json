@@ -174,19 +174,22 @@
         "dev.containers.dockerPath": {
           "type": "string",
           "default": "docker",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path or name of the container engine CLI (`docker` or `podman`)."
         },
         "dev.containers.dockerComposePath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path of the Docker Compose CLI. Leave empty to let the Dev Container CLI choose (`docker compose`, then `docker-compose`)."
         },
         "dev.containers.devcontainerCliPath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path to a `devcontainer` executable. Leave empty to use the Dev Container CLI that ships with this extension."
         },
         "dev.containers.logLevel": {
@@ -207,31 +210,36 @@
         "dev.containers.serverDownloadUrlTemplate": {
           "type": "string",
           "default": "",
-          "scope": "machine",
-          "markdownDescription": "URL template for the IDE server that is installed inside the container. Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${release}`, `${os}`, `${arch}`. Leave empty to use `serverDownloadUrlTemplate` from the IDE's `product.json`, if present."
+          "scope": "application",
+          "ignoreSync": true,
+          "markdownDescription": "URL template for the IDE server that is installed inside the container. Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${os}`, `${arch}`. Leave empty to use `serverDownloadUrlTemplate` from the IDE's `product.json`, if present."
         },
         "dev.containers.kubectlPath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path to the `kubectl` used to attach to Kubernetes pods. Leave empty to use the path configured for the Kubernetes extension, or `kubectl` from `PATH`."
         },
         "dev.containers.kubeconfigPath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods; several files are separated like in `KUBECONFIG` (`;` on Windows and for kubectl in WSL, `:` elsewhere). Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
         },
         "dev.containers.kubectlInWSL": {
           "type": "boolean",
           "default": false,
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Windows only: run `kubectl` inside WSL to attach to Kubernetes pods, for kubectl, credential plugins and kubeconfigs that exist only there. `#dev.containers.kubectlPath#` is then a Linux path (empty: `kubectl` from the login shell's `PATH`), and `~` in `#dev.containers.kubeconfigPath#` is the Linux home directory. When this is not set, the Kubernetes extension's `vs-kubernetes.use-wsl` decides."
         },
         "dev.containers.kubectlWSLDistro": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "The WSL distribution that runs `kubectl` with `#dev.containers.kubectlInWSL#`. Leave empty for the default distribution."
         },
         "dev.containers.kubectlWSLBrowser": {
@@ -245,7 +253,8 @@
             "As WSL opens them (`xdg-open`), for example a browser installed in WSL."
           ],
           "default": "windows",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "With kubectl in WSL (`#dev.containers.kubectlInWSL#`): where the web pages open that kubectl's credential plugins open, such as sign-ins (for example `kubectl oidc-login` or `kubelogin`)."
         },
         "dev.containers.shareKiroLogin": {

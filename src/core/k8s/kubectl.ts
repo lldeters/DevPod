@@ -113,6 +113,9 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/** The phases of a pod; anything else the cluster reports is taken as `Unknown`. */
+const POD_PHASES = new Set(['Pending', 'Running', 'Succeeded', 'Failed', 'Unknown']);
+
 /** Reads the parts of `kubectl get pod -o json` that attaching needs. */
 export function parsePodInfo(json: string): PodInfo {
   let document: unknown;
@@ -153,10 +156,11 @@ export function parsePodInfo(json: string): PodInfo {
     throw new DevContainerError('CLI_BAD_OUTPUT', 'kubectl returned no valid pod description.');
   }
   const preferred = asRecord(metadata['annotations'])['kubectl.kubernetes.io/default-container'];
+  const phase = status['phase'];
   return {
     name,
     namespace: typeof metadata['namespace'] === 'string' ? metadata['namespace'] : '',
-    phase: typeof status['phase'] === 'string' ? status['phase'] : 'Unknown',
+    phase: typeof phase === 'string' && POD_PHASES.has(phase) ? phase : 'Unknown',
     containers,
     ...(typeof preferred === 'string' ? { defaultContainer: preferred } : {}),
   };
@@ -411,8 +415,12 @@ export class Kubectl {
     return this.runWith(this.current(), label, args);
   }
 
-  private async runWith(scope: KubectlScope, label: string, args: string[]): Promise<string> {
-    const launcher = this.launcher(scope.wsl);
+  private async runWith(
+    scope: KubectlScope,
+    label: string,
+    args: string[],
+    launcher = this.launcher(scope.wsl),
+  ): Promise<string> {
     const {
       command,
       args: processArgs,
@@ -441,22 +449,35 @@ export class Kubectl {
   /**
    * The kubeconfig's current context, which is what the Kubernetes explorer shows; `undefined`
    * when there is none. `kubectl config current-context` would fail in that case, and also when
-   * there is no kubeconfig at all, which `config view` reports as empty instead.
+   * there is no kubeconfig at all, which `config view` reports as empty instead. A pod window
+   * passes the `launcher` of its connection, here and to contexts().
    */
-  async currentContext(scope: KubectlScope = this.current()): Promise<string | undefined> {
+  async currentContext(
+    scope: KubectlScope = this.current(),
+    launcher?: KubectlLauncher,
+  ): Promise<string | undefined> {
     const name = (
-      await this.runWith(scope, 'config view', [
-        'config',
-        'view',
-        '--output=jsonpath={.current-context}',
-      ])
+      await this.runWith(
+        scope,
+        'config view',
+        ['config', 'view', '--output=jsonpath={.current-context}'],
+        launcher,
+      )
     ).trim();
     return name === '' ? undefined : name;
   }
 
-  async contexts(scope: KubectlScope = this.current()): Promise<string[]> {
+  async contexts(
+    scope: KubectlScope = this.current(),
+    launcher?: KubectlLauncher,
+  ): Promise<string[]> {
     return (
-      await this.runWith(scope, 'config get-contexts', ['config', 'get-contexts', '--output=name'])
+      await this.runWith(
+        scope,
+        'config get-contexts',
+        ['config', 'get-contexts', '--output=name'],
+        launcher,
+      )
     )
       .split('\n')
       .map((line) => line.trim())
@@ -490,26 +511,35 @@ export class Kubectl {
   /**
    * Describes one pod. Unlike the listing methods, which use the configured kubeconfig and WSL
    * mode, this uses exactly those of `selection`: it must query the cluster the connection will
-   * use, even if the settings have changed since the connection was made.
+   * use, even if the settings have changed since the connection was made. A connection passes the
+   * `launcher` it uses itself.
    */
-  async pod(selection: {
-    context?: string;
-    namespace: string;
-    pod: string;
-    kubeconfig?: string;
-    wsl?: WslSelection;
-  }): Promise<PodInfo> {
+  async pod(
+    selection: {
+      context?: string;
+      namespace: string;
+      pod: string;
+      kubeconfig?: string;
+      wsl?: WslSelection;
+    },
+    launcher?: KubectlLauncher,
+  ): Promise<PodInfo> {
     // Validated like an attach target, since the values become arguments.
     assertPodRef({ ...selection, container: 'placeholder' });
     return parsePodInfo(
-      await this.runWith(selection, 'get pod', [
-        ...kubectlBaseArgs({ context: selection.context, namespace: selection.namespace }),
-        'get',
-        'pod',
-        selection.pod,
-        '-o',
-        'json',
-      ]),
+      await this.runWith(
+        selection,
+        'get pod',
+        [
+          ...kubectlBaseArgs({ context: selection.context, namespace: selection.namespace }),
+          'get',
+          'pod',
+          selection.pod,
+          '-o',
+          'json',
+        ],
+        launcher,
+      ),
     );
   }
 }

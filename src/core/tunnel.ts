@@ -14,8 +14,13 @@ export interface TunnelEndpoint {
 export interface OpenTunnel {
   /** Where the tunnel listens on this machine (always loopback). */
   readonly local: TunnelEndpoint;
+  /** How many connections are open right now; for diagnostics and tests. */
+  connections(): number;
   close(): Promise<void>;
 }
+
+/** How long a connection may stay open after its relay ended, if the client does not close it. */
+const LINGER_MS = 60_000;
 
 /** Starts a process that relays its stdio to `host:port` as seen from inside the container. */
 export type BridgeSpawner = (
@@ -66,7 +71,8 @@ export async function openTunnel(
   const host = normalizeRemoteHost(remote.host);
   let refusalReported = false;
 
-  const server = net.createServer((socket) => {
+  // allowHalfOpen: a client may end its side once it has sent a request and still read the answer.
+  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
     sockets.add(socket);
     const child = spawnBridge(host, remote.port);
     children.add(child);
@@ -95,7 +101,18 @@ export async function openTunnel(
         );
         refusalReported = true;
       }
-      finish();
+      // The relay has ended. The socket still sends what it has buffered and is cleaned up by its
+      // own 'close'; destroying it now would cut off the end of a response to a slow reader. What
+      // the client still sends goes nowhere: it is read away, so that the client's end is noticed
+      // (the stdin pipe would pause the socket instead). A client that never closes is let go of
+      // after a while.
+      children.delete(child);
+      socket.unpipe(child.stdin);
+      socket.resume();
+      socket.end();
+      const linger = setTimeout(() => socket.destroy(), LINGER_MS);
+      linger.unref();
+      socket.once('close', () => clearTimeout(linger));
     });
     socket.pipe(child.stdin);
     child.stdout.pipe(socket);
@@ -121,6 +138,7 @@ export async function openTunnel(
   const { port } = server.address() as net.AddressInfo;
   return {
     local: { host: '127.0.0.1', port },
+    connections: () => sockets.size,
     close: async () => {
       for (const child of children) {
         child.kill();

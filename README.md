@@ -54,7 +54,9 @@ bug reports are welcome in the [issue tracker](https://github.com/lldeters/DevPo
 
 - Kiro (a VS Code 1.103 based build) on Linux, macOS or Windows.
 - Docker or Podman, running, usable without `sudo`.
-- Linux containers on x64 or arm64, with `curl` or `wget`, and `tar`.
+- Linux containers on x64 or arm64 with glibc 2.28 or newer (for example Debian 10, Ubuntu 20.04,
+  RHEL 8 or later), with `curl` or `wget`, and `tar`. Kiro publishes no server for Alpine Linux
+  (musl) or 32-bit ARM.
 
 ## Setup
 
@@ -80,7 +82,9 @@ This extension reads the build information (`commit`, `quality`, `version`,
 server from `serverDownloadUrlTemplate` of `product.json`, or from the setting of the same name.
 Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${os}` (`linux` or `alpine`),
 `${arch}` (`x64`, `arm64`, `armhf`). Unknown placeholders are rejected. The URL must use `https://`
-(or `file://` for an archive inside the container); with `curl`, redirects must stay on `https`.
+(or `file://` for an archive inside the container), and redirects must stay on `https`. With `wget`
+instead of `curl`, the redirects are checked in its output; a `wget` that does not show them (such
+as Wget2) is refused, so install `curl` there.
 
 ## Usage
 
@@ -105,6 +109,12 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | `dev.containers.kubectlWSLBrowser`         | `windows` | Where sign-in pages of kubectl in WSL open: `windows` or `wsl`.           |
 | `dev.containers.shareKiroLogin`            | `ask`     | Copy this machine's Kiro sign-in into containers and pods (see below).    |
 
+Except for `logLevel` and `promptToReopen`, these settings can only be set in the user settings.
+They apply to this machine, also in container and pod windows, and are never taken from a
+workspace, from a `devcontainer.json` or from the settings inside a container. Like every setting
+that only the user settings can hold, they are kept in the settings of the Default profile and apply
+to all profiles.
+
 ## Kubernetes pods
 
 **Attach to Kiro** opens a window in a container of a running pod, like _Attach Visual Studio Code_
@@ -119,14 +129,17 @@ in the original extension.
 - Use **File > Open Folder** in the new window to open a folder of the pod.
 
 What the pod needs: a running container with `sh`, `curl` or `wget`, and `tar`, on Linux x64 or
-arm64. The IDE server is installed in the user's home directory, or, if that is not writable, in
-the private folder `devcontainers-kiro-<uid>` of `$TMPDIR` (or `/tmp`); that folder is refused unless
-it is a directory the user owns. It is not part of the pod's image, so it is installed again after
-the pod is recreated.
+arm64 with glibc 2.28 or newer. The IDE server is installed in the user's home directory, or, if
+that is not writable, in the private folder `devcontainers-kiro-<uid>` of `$TMPDIR` (or `/tmp`);
+that folder is refused unless it is a directory the user owns, and the server's own folder in the
+home directory must belong to the user too. It is not part of the pod's image, so it is installed
+again after the pod is recreated.
 Images without a shell (for example distroless images) cannot be used. `kubectl` must be installed
 and able to reach the cluster; the path and kubeconfig set for the Kubernetes extension in your user
 settings are honored (workspace values are not), or set `dev.containers.kubectlPath` /
-`dev.containers.kubeconfigPath`.
+`dev.containers.kubeconfigPath`. The Kubernetes extension's kubectl path is a machine setting, which
+a pod window does not see once that extension runs in it too; such a window uses the path it was
+attached with, which this extension keeps on your machine (attach again after changing it).
 
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.

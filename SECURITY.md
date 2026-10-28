@@ -24,15 +24,22 @@ steps to reproduce and the impact you see.
   `initializeCommand` on this machine, or kubectl with the kubeconfig it names.
 - This machine's Kiro sign-in is copied into a container or pod only after the user agrees in a
   dialog (default, `dev.containers.shareKiroLogin: "ask"`), and only if the container has none.
-- The IDE server is downloaded over `https` only (or from a file inside the container). In the
-  fallback folder used when the home directory is not writable, the server is installed only if
-  that folder belongs to the user.
+- The IDE server is downloaded over `https` only (or from a file inside the container), also after
+  redirects. Kiro publishes no checksum or signature for its server archives (only for its desktop
+  builds), so the archive is trusted on the strength of that connection, as in Kiro's own remote
+  installer. In the fallback folder used when the home directory is not writable, the server is
+  installed only if that folder belongs to the user, and in the home directory only if the server's
+  own folder does (someone else could have created it where others may write to the home directory,
+  as to an `emptyDir` volume).
 - Values of environment and build arguments, and the values of environment variables whose names
   look like secrets (for example `NPM_TOKEN`), are masked in everything logged or shown from the
   Dev Container CLI, so a log can be shared. Show Diagnostics replaces the home directory by `~`.
-- Paths to programs and to kubeconfig files come from user (or machine) settings only, never from a
-  workspace; this includes the fallback to the Kubernetes extension's settings and whether kubectl
-  runs in WSL. In WSL, kubectl is started with `wsl.exe --exec`, so no shell interprets its
+- Paths to programs and to kubeconfig files, whether kubectl runs in WSL and whether the Kiro sign-in
+  is shared come from the local user settings only (scope `application`): never from a workspace,
+  and never from the settings on the side of a container or pod, which a remote window would
+  otherwise apply. This includes the fallback to the Kubernetes extension's settings. Such settings
+  in a `devcontainer.json` are reported and not written into the container. In WSL, kubectl is
+  started with `wsl.exe --exec`, so no shell interprets its
   arguments; the login profile is read only for `PATH` and `KUBECONFIG`, with its input and output
   detached.
 - The extension edits the IDE's `argv.json` (to enable a proposed API) only after an explicit

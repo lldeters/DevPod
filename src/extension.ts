@@ -12,6 +12,7 @@ import { POD_AUTHORITY_PREFIX } from './core/k8s/podRef';
 import { PodResolver } from './remote/podResolver';
 import { readServerBuildInfo } from './remote/product';
 import { KnownTargets } from './remote/knownTargets';
+import { PodKubectlPaths } from './remote/podKubectlPaths';
 import { RebuildRequests } from './remote/rebuildRequests';
 import { DevContainerResolver } from './remote/resolver';
 import { registerCommands } from './ui/commands';
@@ -74,10 +75,12 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(resolver);
 
   const kubectl = new Kubectl((wsl) => kubectlLauncher(wsl), effectiveKubectlScope);
+  const kubectlPaths = new PodKubectlPaths(context.globalState);
   const podResolver = new PodResolver({
     logger,
     kubectl,
-    kubectlLauncher: (wsl) => kubectlLauncher(wsl),
+    kubectlLauncher: (wsl, authority) =>
+      kubectlLauncher(wsl, { remembered: kubectlPaths.get(authority) }),
     targets,
     serverBuild: readServerBuildInfo,
     serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
@@ -108,6 +111,7 @@ export function activate(context: vscode.ExtensionContext): void {
       targets,
       remoteSupport,
       kubectl,
+      kubectlPaths,
     }),
     registerStatusBar(),
   );

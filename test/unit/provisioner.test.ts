@@ -342,7 +342,7 @@ describe('provisionServer with the Kiro sign-in', () => {
 
   it.each([
     ['exists', 'info', 'already has a Kiro sign-in'],
-    ['nohome', 'warn', 'no private, writable home directory'],
+    ['nohome', 'warn', 'no writable home directory'],
   ])('reports %s', async (answer, level, text) => {
     const executor = fakeExecutor([platformOut, ok(`${answer}\n`), installOut]);
     const logger = new MemoryLogger();

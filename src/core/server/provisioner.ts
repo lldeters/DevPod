@@ -146,8 +146,7 @@ async function syncMachineSettings(
 const LOGIN_MESSAGES = {
   copied: 'Copied the Kiro sign-in of this machine into the container.',
   exists: 'The container already has a Kiro sign-in; it was left unchanged.',
-  nohome:
-    'The container user has no private, writable home directory, so the Kiro sign-in was not copied.',
+  nohome: 'The container user has no writable home directory, so the Kiro sign-in was not copied.',
   declined: 'The Kiro sign-in was not copied into the container (not confirmed).',
 };
 

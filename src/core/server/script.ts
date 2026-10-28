@@ -43,17 +43,15 @@ export interface InstallScriptParams {
 
 /**
  * POSIX sh that sets `BASE` to the folder below which the server lives: the user's `$HOME` if it is
- * a writable directory that not everyone can write to (some images set `HOME=/tmp`), else
- * `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`). The fallback is private to the user and
- * refused (BASE stays empty) unless it is a real directory the user owns, because anyone could have
- * created that predictable name first. The platform check and the install script both use it, so
- * they agree on the folder.
+ * a writable directory, else `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`). The fallback is
+ * private to the user and refused (BASE stays empty) unless it is a real directory the user owns,
+ * because anyone could have created that predictable name first. The platform check and the
+ * install script both use it, so they agree on the folder. (A home directory that others may write
+ * to, such as an emptyDir volume, is used; the install script checks the server's own folder in it.)
  */
 export const CHOOSE_BASE_SCRIPT = `
-# Whether everyone may write to directory $1, as to /tmp: nothing in it is private.
-shared_dir() { case "$(stat -L -c %A "$1" 2>/dev/null || true)" in ????????w?) return 0 ;; esac; return 1; }
 BASE="\${HOME:-}"
-if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ] || shared_dir "$BASE"; then
+if [ -z "$BASE" ] || [ ! -d "$BASE" ] || [ ! -w "$BASE" ]; then
   case "\${TMPDIR:-}" in /*) BASE="$TMPDIR" ;; *) BASE=/tmp ;; esac
   USER_ID="$(id -u 2>/dev/null || true)"
   BASE="\${BASE%/}/devcontainers-kiro-$USER_ID"
@@ -148,6 +146,13 @@ TOKEN_FILE="$ROOT/server-$COMMIT.token"
 PORT_FILE="$ROOT/server-$COMMIT.port"
 
 mkdir -p "$ROOT/bin" || fail "cannot create $ROOT"
+# Where others may write to the home directory (an emptyDir volume is 0777), someone else could
+# have created this folder first, with a server of their own: it must belong to this user.
+ROOT_UID="$(stat -L -c %u "$ROOT" 2>/dev/null || true)"
+USER_UID="$(id -u 2>/dev/null || true)"
+if [ -n "$ROOT_UID" ] && [ -n "$USER_UID" ] && [ "$ROOT_UID" != "$USER_UID" ]; then
+  fail "$ROOT belongs to another user (uid $ROOT_UID); remove it or use another home directory"
+fi
 
 # One run at a time per folder: two windows may connect at once. The owner of the lock is recorded
 # so that a lock left behind by a killed run can be taken over. The owner is written right after the
@@ -180,13 +185,18 @@ if [ ! -f "$SERVER_DIR/.installed" ]; then
       -o "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_LABEL"
   elif command -v wget >/dev/null 2>&1; then
     # wget cannot be told to stay on https after a redirect, so the response headers are kept and
-    # a redirect anywhere else fails the download before the archive is used.
-    wget -S -O "$ARCHIVE" "$DOWNLOAD_URL" 2> "$TMP_DIR/wget.log" || fail "download failed: $DOWNLOAD_LABEL"
+    # a redirect to anything but an https address or a path on the same server fails the download
+    # before the archive is used. (BusyBox reads any other form as an http:// address.) A wget
+    # that does not show the headers on stderr (Wget2) cannot be checked, so it is refused.
+    wget -S -O "$ARCHIVE" "$DOWNLOAD_URL" 2> "$TMP_DIR/wget.log" > /dev/null \\
+      || fail "download failed: $DOWNLOAD_LABEL"
+    [ -n "$(sed -n '/^ *HTTP\\//p' "$TMP_DIR/wget.log")" ] \\
+      || fail "this wget does not show where it was redirected; install curl in the container"
     sed -n 's/^ *[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]: *//p' "$TMP_DIR/wget.log" | tr -d '\\r' > "$TMP_DIR/redirects"
     while IFS= read -r LOCATION; do
       case "$LOCATION" in
         [Hh][Tt][Tt][Pp][Ss]://* | /*) ;;
-        *:*) fail "the download was redirected to an address that is not https" ;;
+        *) fail "the download was redirected to an address that is not https" ;;
       esac
     done < "$TMP_DIR/redirects"
   else

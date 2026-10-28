@@ -15,10 +15,11 @@
 - The log masks the values of more variables that usually hold secrets (names with `passphrase`,
   `cookie`, `session`, `jwt`, `bearer`, or ending in `key` or `pat`).
 - Server installation in the container:
-  - With `wget` instead of `curl`, a download that is redirected to anything but `https` fails
-    before the archive is used, as with `curl`.
-  - A home directory that everyone can write to (such as `HOME=/tmp`) is not used; the private
-    folder in the temporary directory is, and the Kiro sign-in is not copied there.
+  - With `wget` instead of `curl`, a download that is redirected to anything but an `https` address
+    or a path on the same server fails before the archive is used, as with `curl`. A `wget` that
+    does not show where it was redirected (such as Wget2) is refused; install `curl` there.
+  - The server's folder in the home directory must belong to the container user; one that someone
+    else created (possible where others may write to the home directory) is refused.
   - The connection token is checked before the server starts.
   - Two connections at once no longer remove each other's setup lock.
   - The Kiro sign-in and the machine settings are written through a new file with an unpredictable

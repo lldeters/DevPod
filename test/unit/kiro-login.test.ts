@@ -166,15 +166,19 @@ describe('buildShareLoginScript (run with sh)', () => {
     await expect(stat(target())).rejects.toThrow();
   });
 
-  it('writes nothing into a home directory that everyone can write to, such as /tmp', async () => {
+  it('copies into a home directory everyone may write to, readable by the user only', async () => {
     const shared = path.join(home, 'shared');
     await mkdir(shared);
-    await chmod(shared, 0o1777);
-    expect(parseShareLoginResult(run(buildShareLoginScript(SECRET), { HOME: shared }).stdout)).toBe(
-      'nohome',
+    await chmod(shared, 0o777);
+    const file = path.join(shared, ...KIRO_LOGIN_RELATIVE_PATH.split('/'));
+    expect(parseLoginStatus(run(buildLoginStatusScript(), { HOME: shared }).stdout)).toBe(
+      'missing',
     );
-    expect(parseLoginStatus(run(buildLoginStatusScript(), { HOME: shared }).stdout)).toBe('nohome');
-    await expect(stat(path.join(shared, '.aws'))).rejects.toThrow();
+    expect(parseShareLoginResult(run(buildShareLoginScript(SECRET), { HOME: shared }).stdout)).toBe(
+      'copied',
+    );
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect((await stat(path.join(shared, '.aws'))).mode & 0o777).toBe(0o700);
   });
 
   it('does not write through a file or link that is already at a temporary name', async () => {

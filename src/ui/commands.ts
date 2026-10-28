@@ -11,6 +11,7 @@ import { resolveAndValidateConfig } from '../core/config/validate';
 import type { DiscoveredConfig } from '../core/config/discovery';
 import { errorMessage, notificationText } from '../core/errors';
 import type { KnownTargets } from '../remote/knownTargets';
+import type { PodKubectlPaths } from '../remote/podKubectlPaths';
 import type { RebuildRequests } from '../remote/rebuildRequests';
 import { showDiagnostics } from './diagnostics';
 import { attachToPod, resolveExplorerTarget, wslSetting } from './kubernetes';
@@ -47,6 +48,8 @@ export interface CommandServices {
   targets: Pick<KnownTargets, 'add'>;
   remoteSupport: RemoteSupport;
   kubectl: Kubectl;
+  /** Keeps the Kubernetes extension's kubectl path for the pod windows these commands open. */
+  kubectlPaths: Pick<PodKubectlPaths, 'set'>;
   /** Replaceable in tests; by default the Kubernetes extension's API is used. */
   resolveExplorerTarget?: (target: unknown) => Promise<ExplorerTarget | undefined>;
 }
@@ -235,6 +238,7 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
     logger,
     kubectl: services.kubectl,
     targets: services.targets,
+    kubectlPaths: services.kubectlPaths,
     ensureRemoteSupport,
     resolveTarget: services.resolveExplorerTarget ?? resolveExplorerTarget,
     wslSetting: () => wslSetting(),

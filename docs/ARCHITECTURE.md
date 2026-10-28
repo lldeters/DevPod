@@ -238,7 +238,9 @@ which `node` the bridge uses (the server's bundled one if present, else the cont
   also erase it, with `"dev.containers": null`). The same holds for the Kubernetes extension's
   settings used as a fallback (`kubectl-path`, `kubeconfig`, `use-wsl`); its `kubectl-path` has
   scope `machine`, though, so a pod window in which that extension runs too does not see the local
-  value at all (README: set `dev.containers.kubectlPath`). The settings with scope `application`
+  value at all. The value an attach saw is kept per authority in this machine's `globalState`
+  (`src/remote/podKubectlPaths.ts`) and used when the window sees none; it is never part of the
+  authority, which can come from a link. The settings with scope `application`
   in a `devcontainer.json`, and the section written as an object, are reported and not written
   into the container.
 - kubectl in WSL runs with `wsl.exe --exec`, never through the distribution's default shell; batch

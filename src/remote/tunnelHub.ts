@@ -27,6 +27,8 @@ export class TunnelHub implements vscode.Disposable {
   private readonly tunnels = new Set<OpenTunnel>();
   /** Tunnels for configured ports, replaced whenever the window is resolved again. */
   private forwards: OpenTunnel[] = [];
+  /** Tunnels being opened: they count toward the limit before they exist. */
+  private opening = 0;
 
   constructor(
     private readonly logger: Logger,
@@ -66,7 +68,7 @@ export class TunnelHub implements vscode.Disposable {
       );
       throw new Error('The remote window is not connected yet.');
     }
-    if (this.tunnels.size + this.forwards.length >= this.limit) {
+    if (this.count() >= this.limit) {
       this.logger.log(
         'warn',
         `Not forwarding ${remote}: ${this.limit} ports are forwarded already.`,
@@ -76,13 +78,16 @@ export class TunnelHub implements vscode.Disposable {
     this.logger.log('info', `The IDE asked to forward ${remote}; trying local port ${wanted}.`);
 
     let tunnel: OpenTunnel;
+    this.opening++;
     try {
       tunnel = await this.open(target, options.remoteAddress, wanted);
+      this.tunnels.add(tunnel);
     } catch (error) {
       this.logger.log('warn', `Could not forward ${remote}: ${errorMessage(error)}`);
       throw error;
+    } finally {
+      this.opening--;
     }
-    this.tunnels.add(tunnel);
     this.logger.log('info', `Forwarding ${remote} to localhost:${tunnel.local.port}`);
     if (tunnel.local.port !== wanted) {
       this.logger.log(
@@ -118,15 +123,15 @@ export class TunnelHub implements vscode.Disposable {
       return [];
     }
 
-    const allowed = ports.slice(0, Math.max(0, this.limit - this.tunnels.size));
-    if (allowed.length < ports.length) {
-      this.logger.log(
-        'warn',
-        `Forwarding ${allowed.length} of ${ports.length} configured ports: at most ${this.limit} ports are forwarded at once.`,
-      );
-    }
     const described: vscode.TunnelDescription[] = [];
-    for (const port of allowed) {
+    let skipped = 0;
+    for (const port of ports) {
+      // Checked for every port: the IDE may ask for tunnels while these are being opened.
+      if (this.count() >= this.limit) {
+        skipped++;
+        continue;
+      }
+      this.opening++;
       try {
         const tunnel = await this.open(target, port, port.port);
         this.forwards.push(tunnel);
@@ -140,9 +145,21 @@ export class TunnelHub implements vscode.Disposable {
         );
       } catch (error) {
         this.logger.log('warn', `Could not forward port ${port.port}: ${errorMessage(error)}`);
+      } finally {
+        this.opening--;
       }
     }
+    if (skipped > 0) {
+      this.logger.log(
+        'warn',
+        `Forwarding ${ports.length - skipped} of ${ports.length} configured ports: at most ${this.limit} ports are forwarded at once.`,
+      );
+    }
     return described;
+  }
+
+  private count(): number {
+    return this.tunnels.size + this.forwards.length + this.opening;
   }
 
   dispose(): void {

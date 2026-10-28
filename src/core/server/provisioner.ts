@@ -6,6 +6,7 @@ import type { ExecOptions } from '../engine/containerEngine';
 import type { Logger } from '../logger';
 import type { RunResult } from '../process';
 import { detectPlatformScript, parsePlatform } from './platform';
+import type { ContainerPlatform } from './platform';
 import type { ServerBuildInfo } from './productInfo';
 import {
   buildLoginStatusScript,
@@ -21,7 +22,7 @@ import {
 } from './machineSettings';
 import { buildInstallScript, parseInstallResult } from './script';
 import type { InstallResult } from './script';
-import { expandUrlTemplate } from './template';
+import { expandUrlTemplate, urlForLog } from './template';
 
 /** The part of ContainerEngine that provisioning needs; lets tests inject a fake. */
 export interface ServerExecutor {
@@ -192,6 +193,31 @@ async function shareKiroLogin(
   }
 }
 
+/** Kiro's download server, where its product.json points for the server. */
+const KIRO_DOWNLOAD_HOST = 'prod.download.desktop.kiro.dev';
+
+/**
+ * Why a download of the server from Kiro's download server may fail on `platform`: Kiro publishes
+ * its server there for Linux with glibc on x64 and arm64 only (as the server showed in October
+ * 2026), not for Alpine Linux or 32-bit ARM. Empty for other addresses and other platforms.
+ */
+function missingBuildHint(downloadUrl: string, platform: ContainerPlatform): string {
+  let host: string;
+  try {
+    host = new URL(downloadUrl).hostname;
+  } catch {
+    return '';
+  }
+  if (host !== KIRO_DOWNLOAD_HOST || (platform.os === 'linux' && platform.arch !== 'armhf')) {
+    return '';
+  }
+  const what = platform.os === 'alpine' ? 'Alpine Linux, which uses musl' : '32-bit ARM';
+  return (
+    ' Kiro publishes its server for Linux with glibc on x64 and arm64 only; this container is ' +
+    `${platform.os}-${platform.arch} (${what}).`
+  );
+}
+
 /**
  * Makes sure a server matching the IDE is installed and running inside the container, and returns
  * how to reach it. Safe to call repeatedly: an installed, running server is reused.
@@ -224,11 +250,10 @@ export async function provisionServer(
     commit: input.build.commit,
     quality: input.build.quality,
     version: input.build.version,
-    release: '',
     os: platform.os,
     arch: platform.arch,
   });
-  logger.log('info', `Installing the IDE server from ${downloadUrl}`);
+  logger.log('info', `Installing the IDE server from ${urlForLog(downloadUrl)}`);
 
   const output = await runShell(
     executor,
@@ -243,7 +268,16 @@ export async function provisionServer(
     'install',
     signal,
   );
-  const installed = parseInstallResult(output);
+  let installed: InstallResult;
+  try {
+    installed = parseInstallResult(output);
+  } catch (error) {
+    const hint = missingBuildHint(downloadUrl, platform);
+    if (hint && error instanceof DevContainerError && error.message.startsWith('download failed')) {
+      throw new DevContainerError(error.code, `${error.message}.${hint}`, { cause: error });
+    }
+    throw error;
+  }
   logger.log('info', `IDE server listening on 127.0.0.1:${installed.port} in the container`);
   return installed;
 }

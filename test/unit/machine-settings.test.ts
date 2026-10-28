@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -103,7 +103,19 @@ describe.skipIf(process.platform === 'win32' || spawnSync('sh', ['-c', 'true']).
       const text = mergeSettingsText('', { 'editor.fontFamily': 'it\'s "quoted" $(id) `x`' });
       sh(buildWriteSettingsScript(file, text));
       expect(await readFile(file, 'utf8')).toBe(text);
-      expect(() => execFileSync('test', ['-e', `${file}.tmp`])).toThrow();
+      expect(await readdir(path.dirname(file))).toEqual(['settings.json']);
+      // private like the rest of the server's folder
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+      expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
+    });
+
+    it('does not write through a file or link that is already at a temporary name', async () => {
+      const file = path.join(dir, 'Machine', 'settings.json');
+      await mkdir(path.dirname(file), { recursive: true });
+      await symlink(path.join(dir, 'elsewhere'), `${file}.tmp`);
+      sh(buildWriteSettingsScript(file, '{}\n'));
+      expect(await readFile(file, 'utf8')).toBe('{}\n');
+      await expect(stat(path.join(dir, 'elsewhere'))).rejects.toThrow();
     });
 
     it('does not let content that looks like shell or a delimiter escape the here-document', async () => {

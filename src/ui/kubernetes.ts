@@ -4,7 +4,7 @@
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { DevContainerError, errorMessage } from '../core/errors';
+import { DevContainerError, errorMessage, notificationText } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
 import { noContextError, noCurrentContextError } from '../core/k8s/kubectl';
 import type { Kubectl, KubectlScope, PodInfo } from '../core/k8s/kubectl';
@@ -13,7 +13,8 @@ import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { encodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
 import type { KnownTargets } from '../remote/knownTargets';
-import { readSettings } from './settings';
+import type { PodKubectlPaths } from '../remote/podKubectlPaths';
+import { readSettings, userValue } from './settings';
 
 /** What a right-click in the Kubernetes explorer pointed at. */
 export type ExplorerTarget =
@@ -51,29 +52,28 @@ export function expandHome(file: string): string {
   return file === '~' || /^~[\\/]/.test(file) ? path.join(homedir(), file.slice(1)) : file;
 }
 
-/**
- * A setting of the Kubernetes extension as the user set it. Those settings can also come from a
- * workspace, but a program to run, or a kubeconfig (which decides the server and can run commands),
- * must not: this extension's own path settings have scope `machine` for the same reason.
- */
-function userValue<T>(section: string | undefined, key: string): T | undefined {
-  return vscode.workspace.getConfiguration(section).inspect<T>(key)?.globalValue;
+/** The kubectl path the Kubernetes extension is configured with in the user settings, per OS first. */
+export function kubernetesKubectlPath(): string | undefined {
+  const os =
+    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
+  return (
+    nonEmpty(userValue('vscode-kubernetes', `kubectl-path-${os}`)) ??
+    nonEmpty(userValue('vscode-kubernetes', 'kubectl-path'))
+  );
 }
 
 /**
- * The kubectl binary: this extension's setting, else the one the Kubernetes extension is
- * configured with in the user settings (per OS, then general), else `kubectl` from PATH.
+ * The kubectl binary: this extension's setting, else the Kubernetes extension's, else `remembered`,
+ * else `kubectl` from PATH. `remembered` is the Kubernetes extension's path that a pod window was
+ * attached with: that setting has scope `machine`, so the IDE hides it in a pod window in which the
+ * Kubernetes extension runs too.
  */
-export function effectiveKubectlPath(): string {
+export function effectiveKubectlPath(remembered?: string): string {
   const own = readSettings().kubectlPath;
   if (own) {
     return expandHome(own);
   }
-  const os =
-    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
-  const configured =
-    nonEmpty(userValue('vscode-kubernetes', `kubectl-path-${os}`)) ??
-    nonEmpty(userValue('vscode-kubernetes', 'kubectl-path'));
+  const configured = kubernetesKubectlPath() ?? remembered;
   return configured ? expandHome(configured) : 'kubectl';
 }
 
@@ -119,7 +119,9 @@ export function wslSetting(
   platform: NodeJS.Platform = process.platform,
 ): 'dev.containers.kubectlInWSL' | 'vs-kubernetes.use-wsl' | undefined {
   if (platform !== 'win32') return undefined;
-  const own = userValue<boolean>('dev.containers', 'kubectlInWSL');
+  // Only a boolean counts: the string "false" would otherwise turn WSL on.
+  const raw = userValue<unknown>('dev.containers', 'kubectlInWSL');
+  const own = typeof raw === 'boolean' ? raw : undefined;
   if (own !== undefined) return own ? 'dev.containers.kubectlInWSL' : undefined;
   return userValue<unknown>(undefined, 'vs-kubernetes.use-wsl') === true
     ? 'vs-kubernetes.use-wsl'
@@ -142,16 +144,20 @@ function isWindowsProgram(file: string): boolean {
 }
 
 /**
- * How kubectl is started for `wsl` (a window's recorded mode, or the configured one). In WSL,
+ * How kubectl is started for `wsl` (a window's recorded mode, or the configured one), with the
+ * path `remembered` for a pod window (see effectiveKubectlPath). In WSL,
  * `dev.containers.kubectlPath` is a Linux path, and the Kubernetes extension's (Windows) paths do
  * not apply; without one, the login shell's PATH finds kubectl. Sign-in pages open in the Windows
  * browser unless `dev.containers.kubectlWSLBrowser` is `wsl`.
  */
 export function kubectlLauncher(
   wsl: WslSelection | undefined,
-  platform: NodeJS.Platform = process.platform,
+  {
+    remembered,
+    platform = process.platform,
+  }: { remembered?: string | undefined; platform?: NodeJS.Platform } = {},
 ): KubectlLauncher {
-  if (!wsl) return { kubectl: effectiveKubectlPath() };
+  if (!wsl) return { kubectl: effectiveKubectlPath(remembered) };
   if (platform !== 'win32') {
     throw new DevContainerError(
       'ENGINE_UNAVAILABLE',
@@ -177,6 +183,8 @@ export interface AttachDependencies {
   kubectl: Kubectl;
   /** Records the window this opens, so the pod resolver opens it without asking. */
   targets: Pick<KnownTargets, 'add'>;
+  /** Keeps the Kubernetes extension's kubectl path for the window this opens. */
+  kubectlPaths: Pick<PodKubectlPaths, 'set'>;
   /** False (after guiding the user) when the proposed API that remote windows need is not enabled. */
   ensureRemoteSupport: () => Promise<boolean>;
   resolveTarget: (target: unknown) => Promise<ExplorerTarget | undefined>;
@@ -251,7 +259,9 @@ async function chooseInteractively(
 
   const pods = await deps.kubectl.pods(context, namespace);
   if (pods.length === 0) {
-    void vscode.window.showInformationMessage(`There are no pods in namespace "${namespace}".`);
+    void vscode.window.showInformationMessage(
+      notificationText(`There are no pods in namespace "${namespace}".`),
+    );
     return undefined;
   }
   const pod = await pick(
@@ -329,7 +339,10 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
   // The kubeconfig and WSL mode the pod was listed with; the window keeps them.
   const scope = deps.kubectl.scope();
   const pod = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Reading pod ${podName}` },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: notificationText(`Reading pod ${podName}`),
+    },
     () =>
       deps.kubectl.pod({
         namespace,
@@ -351,6 +364,9 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
   });
   deps.logger.log('info', `Attaching to ${namespace}/${podName} (${container}) in a new window`);
   await deps.targets.add(authority);
+  // The new window may not see the Kubernetes extension's kubectl path (see effectiveKubectlPath).
+  // In WSL it does not apply.
+  await deps.kubectlPaths.set(authority, scope.wsl ? undefined : kubernetesKubectlPath());
   await vscode.commands.executeCommand('vscode.newWindow', {
     remoteAuthority: authority,
     reuseWindow: false,

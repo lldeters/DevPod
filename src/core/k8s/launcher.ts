@@ -136,9 +136,15 @@ function wslKubeconfig(value: string, wsl: WslSelection): string {
     .join(WSL_KUBECONFIG_SEPARATOR);
 }
 
-/** The Windows folder (`%SystemRoot%`), such as `C:\Windows`. */
+/**
+ * The Windows folder (`%SystemRoot%`), such as `C:\Windows`. `SystemRoot` counts only as an
+ * absolute path with a drive letter: an empty or relative value would make `wsl.exe` a relative
+ * path, which Windows looks up like a bare name, and would let kubectl in WSL look for the Windows
+ * browser's `rundll32.exe` relative to the Linux home directory.
+ */
 export function windowsRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return env['SystemRoot'] ?? 'C:\\Windows';
+  const root = env['SystemRoot'];
+  return root !== undefined && /^[A-Za-z]:[\\/]/.test(root) ? root : 'C:\\Windows';
 }
 
 /** `wsl.exe` from the Windows system folder, not whatever PATH finds first. */

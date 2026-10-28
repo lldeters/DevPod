@@ -24,8 +24,10 @@ import { encodePodAuthority } from '../../src/core/k8s/podRef';
 import type { PodRef } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
+import { PodKubectlPaths } from '../../src/remote/podKubectlPaths';
 import { PodResolver } from '../../src/remote/podResolver';
 import { askToShareKiroLogin } from '../../src/ui/kiroLogin';
+import { kubectlLauncher } from '../../src/ui/kubernetes';
 import { callLikeTheIde } from '../helpers/ide';
 import * as mock from '../helpers/vscodeMock';
 import { createKubectlStub, podJson } from '../helpers/kubectlStub';
@@ -341,6 +343,14 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       expect((await stub.calls()).some((args) => args.includes('exec'))).toBe(false);
     });
 
+    it('shows no link that the cluster put into an error message', async () => {
+      await stub.set('pod.json', podJson({ name: 'mypod [Retry](command:x.y)', phase: 'Pending' }));
+      const { resolver } = createResolver();
+      const error: unknown = await resolver.resolve(encodePodAuthority(ref)).catch((e) => e);
+      expect(error).toMatchObject({ kind: 'NotAvailable' });
+      expect((error as Error).message).toContain('mypod [Retry] (command:x.y) is not running');
+    });
+
     it('names the containers when the chosen one does not exist', async () => {
       await stub.set('pod.json', podJson({ containers: [{ name: 'web', running: true }] }));
       const { resolver } = createResolver();
@@ -526,6 +536,57 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         message: expect.stringMatching(/Install kubectl or set "dev\.containers\.kubectlPath"/),
       });
       expect(state.errorMessages).toEqual([]);
+    });
+
+    it('reads the current context with the kubectl path kept for its window', async () => {
+      await stub.set('current-context', 'other');
+      const paths = new PodKubectlPaths(new mock.MockMemento() as unknown as vscode.Memento);
+      const { context: _context, ...withoutContext } = ref;
+      const authority = encodePodAuthority(withoutContext);
+      await paths.set(authority, stub.path);
+      const resolver = new PodResolver({
+        logger: new MemoryLogger(),
+        // what the listing queries use, which the connection must not
+        kubectl: new Kubectl(
+          () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
+          () => ({}),
+        ),
+        kubectlLauncher: (wsl, target) => kubectlLauncher(wsl, { remembered: paths.get(target) }),
+        targets: allKnown,
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const resolved = (await resolver.resolve(authority)) as unknown as Resolved;
+      expect(resolved.connectionToken).toMatch(/^[0-9a-f]{48}$/);
+      const execs = (await stub.calls()).filter((args) => args.includes('exec'));
+      expect(execs.length).toBeGreaterThan(0);
+      expect(execs.every((args) => args.includes('--context=other'))).toBe(true);
+    });
+
+    it('runs kubectl from the path kept for its window when no setting shows one', async () => {
+      // As in a pod window in which the Kubernetes extension runs too, which hides its kubectl path.
+      const paths = new PodKubectlPaths(new mock.MockMemento() as unknown as vscode.Memento);
+      const authority = encodePodAuthority(ref);
+      await paths.set(authority, stub.path);
+      await paths.set(encodePodAuthority({ ...ref, pod: 'other' }), path.join(root, 'no-such'));
+      const resolver = new PodResolver({
+        logger: new MemoryLogger(),
+        // what the listing queries use, which the connection must not
+        kubectl: new Kubectl(
+          () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
+          () => ({}),
+        ),
+        kubectlLauncher: (wsl, target) => kubectlLauncher(wsl, { remembered: paths.get(target) }),
+        targets: allKnown,
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const resolved = (await resolver.resolve(authority)) as unknown as Resolved;
+      expect(resolved.connectionToken).toMatch(/^[0-9a-f]{48}$/);
     });
   },
 );

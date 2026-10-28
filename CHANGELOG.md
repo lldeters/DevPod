@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+- The settings for programs and paths (`dockerPath`, `dockerComposePath`, `devcontainerCliPath`,
+  `serverDownloadUrlTemplate`, `kubectlPath`, `kubeconfigPath`, `kubectlInWSL`, `kubectlWSLDistro`,
+  `kubectlWSLBrowser`) now have scope `application`. With scope `machine`, a container or pod
+  window ignored the values from the user settings (for example `podman`) and took them from the
+  settings inside the container instead. They, and `shareKiroLogin`, are read from the user settings of this
+  machine only; such settings in a `devcontainer.json` are reported in the log and not applied.
+  **If you use profiles:** these settings are now kept in the settings of the Default profile and
+  apply to all profiles. A value you set in another profile is no longer used; set it again (the
+  Settings editor now stores it in the Default profile).
+- A pod window uses the kubectl path of the Kubernetes extension that it was attached with when it
+  does not see that setting, which happens once that extension runs in the window too (the setting
+  has scope `machine`). The path is kept on this machine, not in the window's address.
+- Forwarded ports no longer cut off the end of a response when the client reads more slowly than
+  the container sends, and answer clients that end their side right after the request (also when
+  `localhost` in the container resolves to `::1` first and the service listens on IPv4 only).
+- Error messages and progress notifications no longer turn `[text](link)` in the output of a
+  container, a pod, kubectl or the Dev Container CLI into a clickable link.
+- The log masks the values of more variables that usually hold secrets (names with `passphrase`,
+  `cookie`, `session`, `jwt`, `bearer`, or ending in `key` or `pat`).
+- Server installation in the container:
+  - With `wget` instead of `curl`, a download that is redirected to anything but an `https` address
+    or a path on the same server fails before the archive is used, as with `curl`. A `wget` that
+    does not show where it was redirected (such as Wget2) is refused; install `curl` there.
+  - The server's folder in the home directory must belong to the container user; one that someone
+    else created (possible where others may write to the home directory) is refused.
+  - The connection token is checked before the server starts.
+  - Two connections at once no longer remove each other's setup lock. Where `flock` is available and
+    works on the file system, it serializes the setup as well, so a setup that was interrupted can
+    no longer let two later ones run at the same time. The lock directory is still taken too, so
+    windows that still run an older version of this extension wait as before.
+  - The Kiro sign-in and the machine settings are written through a new file with an unpredictable
+    name, and the settings are private to the user like the rest of the server's folder.
+  - The log and error messages show the download address without user name, password and query,
+    which can carry the credentials of a private mirror.
+- `${release}` is no longer listed as a placeholder of `dev.containers.serverDownloadUrlTemplate`:
+  no IDE build provides a value for it, so a template with it always failed. It is now reported as
+  an unknown placeholder.
+- On Windows, `wsl.exe`, and the Windows browser that sign-ins of kubectl in WSL open, are always
+  taken from an absolute system folder, also when `SystemRoot` is empty or not an absolute path.
+- At most 200 ports are forwarded at once per window; further requests are refused and logged.
+- When the server download from Kiro's download server fails in a container with Alpine Linux or
+  32-bit ARM, the message says that Kiro publishes its server for Linux with glibc on x64 and arm64
+  only. The README names the glibc version the server needs.
+
 ## 0.2.3 (2026-10-28)
 
 - **Sign-ins of kubectl in WSL open in the Windows browser**: web pages that credential plugins

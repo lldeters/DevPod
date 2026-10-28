@@ -5,7 +5,7 @@ import {
   PLATFORM_MARKER,
 } from '../../src/core/server/platform';
 import { parseServerBuildInfo } from '../../src/core/server/productInfo';
-import { expandUrlTemplate } from '../../src/core/server/template';
+import { expandUrlTemplate, urlForLog } from '../../src/core/server/template';
 
 const product = {
   commit: 'abc123',
@@ -49,7 +49,6 @@ describe('expandUrlTemplate', () => {
     commit: 'c1',
     quality: 'stable',
     version: '1.2.3',
-    release: '',
     os: 'linux',
     arch: 'x64',
   };
@@ -65,7 +64,15 @@ describe('expandUrlTemplate', () => {
   });
 
   it('rejects placeholders without a value', () => {
-    expect(() => expandUrlTemplate('https://h/${release}', vars)).toThrowError(/release/);
+    expect(() => expandUrlTemplate('https://h/${quality}', { ...vars, quality: '' })).toThrowError(
+      /no value/,
+    );
+  });
+
+  it('knows no ${release}, which no IDE build provides', () => {
+    expect(() => expandUrlTemplate('https://h/${release}', vars)).toThrowError(
+      /Unknown placeholder \$\{release\}/,
+    );
   });
 
   it('percent-encodes substituted values', () => {
@@ -110,5 +117,19 @@ describe('parsePlatform', () => {
   it('ships a detection script that is plain POSIX sh', () => {
     expect(detectPlatformScript).toContain(`${PLATFORM_MARKER}: start`);
     expect(detectPlatformScript).not.toMatch(/\[\[|\bbash\b/);
+  });
+});
+
+describe('urlForLog', () => {
+  it.each([
+    [
+      'https://user:secret@mirror.example:8443/a/b.tar.gz?token=x#f',
+      'https://mirror.example:8443/a/b.tar.gz',
+    ],
+    ['https://h/releases/c1/server.tar.gz', 'https://h/releases/c1/server.tar.gz'],
+    ['file:///tmp/server.tar.gz', 'file:///tmp/server.tar.gz'],
+    ['not a url', 'the configured address'],
+  ])('%s -> %s', (url, expected) => {
+    expect(urlForLog(url)).toBe(expected);
   });
 });

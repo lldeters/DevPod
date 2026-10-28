@@ -56,7 +56,9 @@ export function buildReadSettingsScript(file: string): string {
 
 /**
  * Writes `text` to `file` (creating its folder) through a quoted here-document, so the content is
- * never interpreted by the shell. The write is atomic: a temporary file is renamed into place.
+ * never interpreted by the shell. The write is atomic: a new file with an unpredictable name, so
+ * nothing already there (a file or a link) is written through, is renamed into place. Like the
+ * rest of the server's folder, folders and file are private to the user.
  */
 export function buildWriteSettingsScript(file: string, text: string): string {
   const delimiter = `DCK_${randomBytes(12).toString('hex')}`;
@@ -69,12 +71,15 @@ export function buildWriteSettingsScript(file: string, text: string): string {
   const body = text.endsWith('\n') ? text : `${text}\n`;
   return [
     'set -eu',
-    'umask 022',
+    'umask 077',
     `FILE=${shQuote(file)}`,
     'mkdir -p "$(dirname "$FILE")"',
-    `cat > "$FILE.tmp" <<'${delimiter}'`,
+    'TMP=""',
+    `trap 'if [ -n "$TMP" ]; then rm -f "$TMP"; fi' EXIT`,
+    'TMP="$(mktemp "$FILE.XXXXXX")"',
+    `cat > "$TMP" <<'${delimiter}'`,
     `${body}${delimiter}`,
-    'mv "$FILE.tmp" "$FILE"',
+    'mv "$TMP" "$FILE"',
     '',
   ].join('\n');
 }

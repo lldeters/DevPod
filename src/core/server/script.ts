@@ -79,9 +79,10 @@ const REQUIRED_SERVER_ARGS = [
  * Running it again reuses a running server. The script is meant to be piped to `sh -s`, so no
  * value ever appears on a process command line.
  *
- * Runs for the same folder are serialized with a lock directory, since two windows may connect at
- * the same time. A running server is recognized by its PID and its start time, so a PID that was
- * handed to another process after a restart is not mistaken for the server.
+ * Runs for the same folder are serialized with flock (or a lock directory where flock is missing or
+ * does not work), since two windows may connect at the same time. A running server is recognized by
+ * its PID and its start time, so a PID that was handed to another process after a restart is not
+ * mistaken for the server.
  */
 export function buildInstallScript(params: InstallScriptParams): string {
   assertSafeName(params.dataFolderName, 'server data folder name', true);
@@ -111,8 +112,10 @@ echo "${INSTALL_MARKER}: start"
 TMP_DIR=""
 LOCK_DIR=""
 OWNER=""
+PROBE=""
 cleanup() {
   if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi
+  if [ -n "$PROBE" ]; then rm -f "$PROBE"; fi
   # Only a lock this run still holds: one that was taken over meanwhile belongs to another run.
   if [ -n "$LOCK_DIR" ] && [ "$(cat "$LOCK_DIR/owner" 2>/dev/null || true)" = "$OWNER" ]; then
     rm -rf "$LOCK_DIR"
@@ -154,41 +157,66 @@ if [ -n "$ROOT_UID" ] && [ -n "$USER_UID" ] && [ "$ROOT_UID" != "$USER_UID" ]; t
   fail "$ROOT belongs to another user (uid $ROOT_UID); remove it or use another home directory"
 fi
 
-# One run at a time per folder: two windows may connect at once. The owner of the lock is recorded
-# so that a lock left behind by a killed run can be taken over. The owner is written right after the
-# lock is created, so a lock without one for a whole minute was left by a run killed in between,
-# not by a slow one.
-OWNER="$$ $(proc_start $$)"
+# One run at a time per folder: two windows may connect at once. flock is used where it works on
+# this file system, which is tried on a file of this run first: the kernel releases its lock when a
+# run ends, however it ends, so there is nothing to take over. (BusyBox's flock has no -w, hence the
+# loop with -n; touch first, because dash exits when exec cannot open a file.) Descriptor 9 holds
+# the lock until the script exits; programs that may outlive a killed run are started without it.
+USE_FLOCK=""
+PROBE="$ROOT/flock.$$"
+if command -v flock >/dev/null 2>&1 && touch "$PROBE" 2>/dev/null; then
+  exec 8>> "$PROBE"
+  if flock -n 8 2>/dev/null; then USE_FLOCK=1; fi
+  exec 8>&-
+  rm -f "$PROBE"
+fi
+PROBE=""
 WAITED=0
-UNOWNED=0
-until mkdir "$ROOT/setup.lock" 2>/dev/null; do
-  HOLDER="$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)"
-  if [ -n "$HOLDER" ]; then UNOWNED=0; else UNOWNED=$((UNOWNED + 1)); fi
-  # shellcheck disable=SC2086 # the owner file holds "<pid> <start time>"
-  if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 60 ]; then
-    rm -rf "$ROOT/setup.lock"
-    continue
-  fi
-  [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.lock)"
-  WAITED=$((WAITED + 1))
-  sleep 1
-done
-LOCK_DIR="$ROOT/setup.lock"
-echo "$OWNER" > "$LOCK_DIR/owner"
+if [ -n "$USE_FLOCK" ]; then
+  touch "$ROOT/setup.flock" 2>/dev/null || fail "cannot create $ROOT/setup.flock"
+  exec 9>> "$ROOT/setup.flock"
+  until flock -n 9 2>/dev/null; do
+    [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.flock)"
+    WAITED=$((WAITED + 1))
+    sleep 1
+  done
+else
+  # A lock directory instead. Its owner is recorded so that a lock left behind by a killed run can
+  # be taken over; it is written right after the lock is created, so a lock without one for a whole
+  # minute was left by a run killed in between, not by a slow one. (Two runs that find the same
+  # stale lock can both go on; flock does not have that gap.)
+  OWNER="$$ $(proc_start $$)"
+  UNOWNED=0
+  until mkdir "$ROOT/setup.lock" 2>/dev/null; do
+    HOLDER="$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)"
+    if [ -n "$HOLDER" ]; then UNOWNED=0; else UNOWNED=$((UNOWNED + 1)); fi
+    # shellcheck disable=SC2086 # the owner file holds "<pid> <start time>"
+    if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 60 ]; then
+      rm -rf "$ROOT/setup.lock"
+      continue
+    fi
+    [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.lock)"
+    WAITED=$((WAITED + 1))
+    sleep 1
+  done
+  LOCK_DIR="$ROOT/setup.lock"
+  echo "$OWNER" > "$LOCK_DIR/owner"
+fi
 
 if [ ! -f "$SERVER_DIR/.installed" ]; then
   TMP_DIR="$(mktemp -d "$ROOT/tmp.XXXXXX")" || fail "mktemp failed"
   ARCHIVE="$TMP_DIR/server.tar.gz"
   if command -v curl >/dev/null 2>&1; then
     # The archive becomes code in the container: https only (or a local file), also after redirects.
+    # 9>&-: a download left running by a killed run must not keep the setup lock.
     curl -fsSL --proto '=https,file' --proto-redir '=https' --retry 3 --connect-timeout 20 \\
-      -o "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_LABEL"
+      -o "$ARCHIVE" "$DOWNLOAD_URL" 9>&- || fail "download failed: $DOWNLOAD_LABEL"
   elif command -v wget >/dev/null 2>&1; then
     # wget cannot be told to stay on https after a redirect, so the response headers are kept and
     # a redirect to anything but an https address or a path on the same server fails the download
     # before the archive is used. (BusyBox reads any other form as an http:// address.) A wget
     # that does not show the headers on stderr (Wget2) cannot be checked, so it is refused.
-    wget -S -O "$ARCHIVE" "$DOWNLOAD_URL" 2> "$TMP_DIR/wget.log" > /dev/null \\
+    wget -S -O "$ARCHIVE" "$DOWNLOAD_URL" 2> "$TMP_DIR/wget.log" > /dev/null 9>&- \\
       || fail "download failed: $DOWNLOAD_LABEL"
     [ -n "$(sed -n '/^ *HTTP\\//p' "$TMP_DIR/wget.log")" ] \\
       || fail "this wget does not show where it was redirected; install curl in the container"
@@ -204,7 +232,7 @@ if [ ! -f "$SERVER_DIR/.installed" ]; then
   fi
   command -v tar >/dev/null 2>&1 || fail "tar is not installed in the container"
   mkdir -p "$TMP_DIR/extract"
-  tar -xzf "$ARCHIVE" -C "$TMP_DIR/extract" --strip-components=${strip} || fail "extraction failed"
+  tar -xzf "$ARCHIVE" -C "$TMP_DIR/extract" --strip-components=${strip} 9>&- || fail "extraction failed"
   rm -rf "$SERVER_DIR"
   mv "$TMP_DIR/extract" "$SERVER_DIR" || fail "could not move the server into place"
   touch "$SERVER_DIR/.installed"
@@ -225,7 +253,7 @@ else
   # --server-data-dir keeps the server's data (extensions, settings, state) next to it, which
   # matters when it lives in the fallback folder rather than in $HOME.
   $LAUNCH "$SERVER_DIR/bin/$APP_NAME" ${serverArgs} --server-data-dir "$ROOT" \\
-    --connection-token-file "$TOKEN_FILE" > "$LOG_FILE" 2>&1 < /dev/null &
+    --connection-token-file "$TOKEN_FILE" > "$LOG_FILE" 2>&1 < /dev/null 9>&- &
   SERVER_PID=$!
   echo "$SERVER_PID" > "$PID_FILE"
   proc_start "$SERVER_PID" > "$START_FILE"

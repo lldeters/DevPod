@@ -193,13 +193,24 @@ async function shareKiroLogin(
   }
 }
 
+/** Kiro's download server, where its product.json points for the server. */
+const KIRO_DOWNLOAD_HOST = 'prod.download.desktop.kiro.dev';
+
 /**
- * Why a download from the IDE's own address may fail on `platform`: Kiro publishes its server for
- * Linux with glibc on x64 and arm64 only (as its download server showed in October 2026), not for
- * Alpine Linux or 32-bit ARM. Empty for the platforms it publishes.
+ * Why a download of the server from Kiro's download server may fail on `platform`: Kiro publishes
+ * its server there for Linux with glibc on x64 and arm64 only (as the server showed in October
+ * 2026), not for Alpine Linux or 32-bit ARM. Empty for other addresses and other platforms.
  */
-function missingBuildHint(platform: ContainerPlatform): string {
-  if (platform.os === 'linux' && platform.arch !== 'armhf') return '';
+function missingBuildHint(downloadUrl: string, platform: ContainerPlatform): string {
+  let host: string;
+  try {
+    host = new URL(downloadUrl).hostname;
+  } catch {
+    return '';
+  }
+  if (host !== KIRO_DOWNLOAD_HOST || (platform.os === 'linux' && platform.arch !== 'armhf')) {
+    return '';
+  }
   const what = platform.os === 'alpine' ? 'Alpine Linux, which uses musl' : '32-bit ARM';
   return (
     ' Kiro publishes its server for Linux with glibc on x64 and arm64 only; this container is ' +
@@ -261,7 +272,7 @@ export async function provisionServer(
   try {
     installed = parseInstallResult(output);
   } catch (error) {
-    const hint = template === input.build.downloadUrlTemplate ? missingBuildHint(platform) : '';
+    const hint = missingBuildHint(downloadUrl, platform);
     if (hint && error instanceof DevContainerError && error.message.startsWith('download failed')) {
       throw new DevContainerError(error.code, `${error.message}.${hint}`, { cause: error });
     }

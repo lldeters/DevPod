@@ -137,10 +137,17 @@ describe('provisionServer', () => {
       stdout: `${INSTALL_MARKER}: start\nerror==${error}\n${INSTALL_MARKER}: end\n`,
       stderr: '',
     });
-    const install = (machine: string, libc: string, error: string, urlTemplate?: string) =>
+    const kiro =
+      'https://prod.download.desktop.kiro.dev/releases/remotes/${commit}/kiro-reh-${os}-${arch}.tar.gz';
+    const install = (machine: string, libc: string, error: string, urlTemplate = kiro) =>
       provisionServer(
         fakeExecutor([platform(machine, libc), failed(error)]),
-        { containerId: 'c1', user: 'u', build, ...(urlTemplate ? { urlTemplate } : {}) },
+        {
+          containerId: 'c1',
+          user: 'u',
+          build: { ...build, downloadUrlTemplate: kiro },
+          urlTemplate,
+        },
         new MemoryLogger(),
       );
 
@@ -159,13 +166,18 @@ describe('provisionServer', () => {
       });
     });
 
-    it('says nothing about Kiro for another address or another failure', async () => {
-      const own = 'https://mirror.example/${commit}/${os}-${arch}.tar.gz';
+    it('says nothing about Kiro for another address, platform or failure', async () => {
+      const mirror = 'https://mirror.example/${commit}/${os}-${arch}.tar.gz';
       await expect(
-        install('x86_64', 'musl', 'download failed: https://mirror.example/x', own),
+        install('x86_64', 'musl', 'download failed: https://mirror.example/x', mirror),
       ).rejects.toMatchObject({ message: 'download failed: https://mirror.example/x' });
       await expect(install('x86_64', 'musl', 'extraction failed')).rejects.toMatchObject({
         message: 'extraction failed',
+      });
+      await expect(
+        install('x86_64', 'gnu', 'download failed: https://prod.download.desktop.kiro.dev/x'),
+      ).rejects.toMatchObject({
+        message: 'download failed: https://prod.download.desktop.kiro.dev/x',
       });
     });
   });

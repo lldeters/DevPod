@@ -79,10 +79,10 @@ const REQUIRED_SERVER_ARGS = [
  * Running it again reuses a running server. The script is meant to be piped to `sh -s`, so no
  * value ever appears on a process command line.
  *
- * Runs for the same folder are serialized with flock (or a lock directory where flock is missing or
- * does not work), since two windows may connect at the same time. A running server is recognized by
- * its PID and its start time, so a PID that was handed to another process after a restart is not
- * mistaken for the server.
+ * Runs for the same folder are serialized with flock where it works, and with a lock directory that
+ * older versions of this extension use too, since two windows may connect at the same time. A
+ * running server is recognized by its PID and its start time, so a PID that was handed to another
+ * process after a restart is not mistaken for the server.
  */
 export function buildInstallScript(params: InstallScriptParams): string {
   assertSafeName(params.dataFolderName, 'server data folder name', true);
@@ -157,14 +157,13 @@ if [ -n "$ROOT_UID" ] && [ -n "$USER_UID" ] && [ "$ROOT_UID" != "$USER_UID" ]; t
   fail "$ROOT belongs to another user (uid $ROOT_UID); remove it or use another home directory"
 fi
 
-# One run at a time per folder: two windows may connect at once. flock is used where it works on
-# this file system, which is tried on a file of this run first: the kernel releases its lock when a
-# run ends, however it ends, so there is nothing to take over. (BusyBox's flock has no -w, hence the
-# loop with -n; touch first, because dash exits when exec cannot open a file.) Descriptor 9 holds
-# the lock until the script exits; programs that may outlive a killed run are started without it.
+# One run at a time per folder: two windows may connect at once. Runs wait for each other with
+# flock where it works on this file system, which is tried on a file of this run first: the kernel
+# releases its lock when a run ends, however it ends. (BusyBox's flock has no -w, hence the loop
+# with -n; touch first, because dash exits when exec cannot open a file.) Descriptor 9 holds the
+# lock until the script exits; programs that may outlive a killed run are started without it.
 USE_FLOCK=""
-PROBE="$ROOT/flock.$$"
-if command -v flock >/dev/null 2>&1 && touch "$PROBE" 2>/dev/null; then
+if command -v flock >/dev/null 2>&1 && PROBE="$(mktemp "$ROOT/flock.XXXXXX" 2>/dev/null)"; then
   exec 8>> "$PROBE"
   if flock -n 8 2>/dev/null; then USE_FLOCK=1; fi
   exec 8>&-
@@ -180,28 +179,29 @@ if [ -n "$USE_FLOCK" ]; then
     WAITED=$((WAITED + 1))
     sleep 1
   done
-else
-  # A lock directory instead. Its owner is recorded so that a lock left behind by a killed run can
-  # be taken over; it is written right after the lock is created, so a lock without one for a whole
-  # minute was left by a run killed in between, not by a slow one. (Two runs that find the same
-  # stale lock can both go on; flock does not have that gap.)
-  OWNER="$$ $(proc_start $$)"
-  UNOWNED=0
-  until mkdir "$ROOT/setup.lock" 2>/dev/null; do
-    HOLDER="$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)"
-    if [ -n "$HOLDER" ]; then UNOWNED=0; else UNOWNED=$((UNOWNED + 1)); fi
-    # shellcheck disable=SC2086 # the owner file holds "<pid> <start time>"
-    if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 60 ]; then
-      rm -rf "$ROOT/setup.lock"
-      continue
-    fi
-    [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.lock)"
-    WAITED=$((WAITED + 1))
-    sleep 1
-  done
-  LOCK_DIR="$ROOT/setup.lock"
-  echo "$OWNER" > "$LOCK_DIR/owner"
 fi
+# Every run also takes the lock directory, which is all that runs without flock know, and older
+# versions of this extension in windows that were not reloaded. Its owner is recorded so that a
+# lock left behind by a killed run can be taken over; it is written right after the lock is
+# created, so a lock without one for a whole minute was left by a run killed in between, not by a
+# slow one. (Two runs that find the same stale lock can both go on; runs that hold flock never
+# get here at the same time.)
+OWNER="$$ $(proc_start $$)"
+UNOWNED=0
+until mkdir "$ROOT/setup.lock" 2>/dev/null; do
+  HOLDER="$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)"
+  if [ -n "$HOLDER" ]; then UNOWNED=0; else UNOWNED=$((UNOWNED + 1)); fi
+  # shellcheck disable=SC2086 # the owner file holds "<pid> <start time>"
+  if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 60 ]; then
+    rm -rf "$ROOT/setup.lock"
+    continue
+  fi
+  [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.lock)"
+  WAITED=$((WAITED + 1))
+  sleep 1
+done
+LOCK_DIR="$ROOT/setup.lock"
+echo "$OWNER" > "$LOCK_DIR/owner"
 
 if [ ! -f "$SERVER_DIR/.installed" ]; then
   TMP_DIR="$(mktemp -d "$ROOT/tmp.XXXXXX")" || fail "mktemp failed"

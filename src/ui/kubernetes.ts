@@ -91,7 +91,8 @@ export function effectiveWsl(
   platform: NodeJS.Platform = process.platform,
 ): WslSelection | undefined {
   if (platform !== 'win32') return undefined;
-  const own = userValue<boolean>('dev.containers', 'kubectlInWSL');
+  const raw = userValue<unknown>('dev.containers', 'kubectlInWSL');
+  const own = typeof raw === 'boolean' ? raw : undefined;
   const enabled = own ?? userValue<unknown>(undefined, 'vs-kubernetes.use-wsl') === true;
   if (!enabled) return undefined;
   const distro = readSettings().kubectlWSLDistro;

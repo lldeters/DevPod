@@ -34,16 +34,29 @@ export interface IdeCustomizations {
   /** Entries that are not plain extension ids (for example with a version); reported, not used. */
   rejectedExtensions: string[];
   /**
-   * Settings of this extension (`dev.containers.*`, also written as an object). They decide what
-   * runs on this machine and count only in the local user settings, so they are reported instead
-   * of being written into the container.
+   * Settings of this extension that decide what runs on this machine (scope `application`). They
+   * count only in the local user settings, so they are reported instead of being written into the
+   * container; so is the section written as an object, which could hold them.
    */
   ignoredSettings: string[];
 }
 
-/** A key that sets this extension's settings, as `dev.containers.<name>` or as a section object. */
-function isOwnSetting(key: string): boolean {
-  return key === 'dev' || key === 'dev.containers' || key.startsWith('dev.containers.');
+/** This extension's settings with scope `application` (test/unit/manifest.test.ts checks the list). */
+export const LOCAL_ONLY_SETTINGS: readonly string[] = [
+  'dockerPath',
+  'dockerComposePath',
+  'devcontainerCliPath',
+  'serverDownloadUrlTemplate',
+  'kubectlPath',
+  'kubeconfigPath',
+  'kubectlInWSL',
+  'kubectlWSLDistro',
+  'shareKiroLogin',
+].map((name) => `dev.containers.${name}`);
+
+/** A key that sets one of them, also as part of a section object (`"dev.containers": { ... }`). */
+function isLocalOnlySetting(key: string): boolean {
+  return key === 'dev' || key === 'dev.containers' || LOCAL_ONLY_SETTINGS.includes(key);
 }
 
 /**
@@ -75,7 +88,7 @@ export function extractCustomizations(config: Record<string, unknown>): IdeCusto
     }
     if (isRecord(source['settings'])) {
       for (const [key, value] of Object.entries(source['settings'])) {
-        if (!isOwnSetting(key)) {
+        if (!isLocalOnlySetting(key)) {
           settings[key] = value;
         } else if (!ignoredSettings.includes(key)) {
           ignoredSettings.push(key);

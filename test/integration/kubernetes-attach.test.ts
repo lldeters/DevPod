@@ -307,7 +307,7 @@ describe('which kubectl and kubeconfig are used', () => {
     expect(effectiveKubeconfig()).toBe('/home/me/.kube/config');
   });
 
-  it("uses only this machine's Kubernetes settings in a container or pod window", () => {
+  it('takes no Kubernetes setting from the container side in a pod window', () => {
     state.remoteName = 'k8s-pod';
     state.settings['vscode-kubernetes.kubectl-path'] = '/usr/local/bin/kubectl';
     expect(effectiveKubectlPath()).toBe('/usr/local/bin/kubectl');

@@ -8,6 +8,9 @@
   ignored the values from the user settings (for example `podman`) and took them from the settings
   inside the container instead. They, and `shareKiroLogin`, are read from the user settings of this
   machine only; such settings in a `devcontainer.json` are reported in the log and not applied.
+  **If you use profiles:** these settings are now kept in the settings of the Default profile and
+  apply to all profiles. A value you set in another profile is no longer used; set it again (the
+  Settings editor now stores it in the Default profile).
 - Forwarded ports no longer cut off the end of a response when the client reads more slowly than
   the container sends, and answer clients that end their side right after the request.
 - Error messages and progress notifications no longer turn `[text](link)` in the output of a

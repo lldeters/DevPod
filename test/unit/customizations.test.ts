@@ -109,12 +109,18 @@ describe('extractCustomizations', () => {
             'dev.containers': { kubectlPath: '/x/kubectl' },
             dev: { containers: { devcontainerCliPath: '/x/cli.js' } },
             'dev.containersExtra': true,
+            'dev.containers.logLevel': 'debug',
           },
         },
         kiro: { settings: { 'dev.containers.dockerPath': '/y/docker' } },
       },
     });
-    expect(result.settings).toEqual({ 'editor.tabSize': 2, 'dev.containersExtra': true });
+    // logLevel is no program or path: it applies in the container window, as before.
+    expect(result.settings).toEqual({
+      'editor.tabSize': 2,
+      'dev.containersExtra': true,
+      'dev.containers.logLevel': 'debug',
+    });
     expect(result.ignoredSettings).toEqual(['dev.containers.dockerPath', 'dev.containers', 'dev']);
   });
 });

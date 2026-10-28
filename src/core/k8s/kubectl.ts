@@ -187,18 +187,37 @@ export function notStartedMessage(launcher: KubectlLauncher): string {
   return `Could not run "${launcher.kubectl}". Install kubectl or set "dev.containers.kubectlPath".`;
 }
 
-// kubectl's own log lines (klog), such as "E1028 09:05:27.691553  284 memcache.go:381] ...".
+// kubectl's own log lines (klog), such as "E1028 09:05:27.691553  284 memcache.go:381] ...". An
+// entry whose value spans lines ends its first line with "<" and closes with a line ">".
 const KLOG_LINE = /^[IWEF]\d{4} \d\d:\d\d:\d\d\.\d+\s+\d+ [\w.-]+:\d+\]/;
+// Where kubectl's own message starts; the lines after it explain it.
+const ERROR_LINE = /^(error:|Error from server|Unable to connect|The connection to the server)/i;
 
-/** The last lines that say something: without carriage returns, NULs (UTF-16) and klog noise. */
+/**
+ * The lines that say what went wrong: without carriage returns, NULs (UTF-16) and klog entries,
+ * from kubectl's last error line on (else the last lines), at most `lines` of them.
+ */
 function tail(output: string, lines = 3): string {
-  const all = output
-    .replaceAll('\0', '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
-  const messages = all.filter((line) => !KLOG_LINE.test(line));
-  return (messages.length > 0 ? messages : all).slice(-lines).join('\n');
+  const all: string[] = [];
+  const messages: string[] = [];
+  let inKlogValue = false;
+  for (const raw of output.replaceAll('\0', '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (inKlogValue) {
+      inKlogValue = line !== '>';
+    } else if (KLOG_LINE.test(line)) {
+      inKlogValue = line.endsWith('<');
+    } else if (line !== '') {
+      messages.push(line);
+    }
+    if (line !== '') all.push(line);
+  }
+  if (messages.length === 0) return all.slice(-lines).join('\n');
+  let from = -1;
+  messages.forEach((line, index) => {
+    if (ERROR_LINE.test(line)) from = index;
+  });
+  return (from >= 0 ? messages.slice(from, from + lines) : messages.slice(-lines)).join('\n');
 }
 
 /**
@@ -207,7 +226,10 @@ function tail(output: string, lines = 3): string {
  */
 function wslFailure(wsl: WslSelection, output: string): DevContainerError | undefined {
   const text = output.replaceAll('\0', '');
-  const code = /\bWSL_E_[A-Z0-9_]+\b/.exec(text)?.[0];
+  // "Error code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND", or ".../HCS/HCS_E_HYPERV_NOT_INSTALLED".
+  const code =
+    /\bWsl\/(?:[\w-]+\/)*([A-Za-z][\w-]*)/.exec(text)?.[1] ??
+    /\bWSL_E_[A-Z0-9_]+\b/.exec(text)?.[0];
   if (code === 'WSL_E_DISTRO_NOT_FOUND' && wsl.distro !== undefined) {
     return new DevContainerError(
       'CONFIG_INVALID',
@@ -221,7 +243,10 @@ function wslFailure(wsl: WslSelection, output: string): DevContainerError | unde
   if (
     code === 'WSL_E_DISTRO_NOT_FOUND' ||
     code === 'WSL_E_DEFAULT_DISTRO_NOT_FOUND' ||
-    /wsl(\.exe)? --install\b/.test(text)
+    // Without any distribution, WSL prints no code, only how to list and install one.
+    (code === undefined &&
+      /wsl(\.exe)? --install\b/.test(text) &&
+      !text.includes('--no-distribution'))
   ) {
     return new DevContainerError(
       'ENGINE_UNAVAILABLE',
@@ -290,9 +315,11 @@ export function noContextError(scope: KubectlScope): DevContainerError {
   return new DevContainerError(
     'CONFIG_NOT_FOUND',
     `${kubectlIn(scope.wsl)} found no Kubernetes context in ` +
-      `${file ?? "~/.kube/config of the distribution's default user, or the file that KUBECONFIG names in the login profile (~/.profile, not ~/.bashrc)"}: ` +
-      'the file does not exist there or lists no contexts. If your kubeconfig is on Windows, set ' +
-      '"dev.containers.kubeconfigPath" to it (for example C:\\Users\\<you>\\.kube\\config). A ' +
+      `${file ?? "~/.kube/config of the distribution's default user, or the file that KUBECONFIG names in the login profile (~/.profile, ~/.bash_profile or ~/.zprofile, not ~/.bashrc)"}: ` +
+      'the file does not exist there or lists no contexts. If your kubeconfig is on Windows, copy ' +
+      'it into the distribution or set "dev.containers.kubeconfigPath" to it (for example ' +
+      'C:\\Users\\<you>\\.kube\\config); certificate files and credential plugins it names must ' +
+      'then exist in WSL. A ' +
       'distribution created with "wsl --import" runs as root unless it has a default user. To run ' +
       'kubectl on Windows instead, set "dev.containers.kubectlInWSL" to false.',
   );
@@ -302,22 +329,31 @@ export function noContextError(scope: KubectlScope): DevContainerError {
 export function noCurrentContextError(
   scope: KubectlScope,
   situation: 'explorer' | 'window',
+  platform: NodeJS.Platform = process.platform,
 ): DevContainerError {
-  const set = `Set one with "kubectl config use-context <name>"${scope.wsl ? ' in that distribution' : ''}`;
+  const file = scope.kubeconfig === undefined ? undefined : `"${scope.kubeconfig}"`;
+  const set =
+    `Set one with "kubectl config use-context <name>` +
+    `${scope.kubeconfig === undefined ? '' : ` --kubeconfig=${scope.kubeconfig}`}"` +
+    `${scope.wsl ? ' in that distribution' : ''}`;
   if (situation === 'explorer') {
     return new DevContainerError(
       'CONFIG_INVALID',
-      `${kubectlIn(scope.wsl)} has no current Kubernetes context, so it does not know the ` +
-        'cluster of the Kubernetes explorer. The explorer may use another kubectl: the Kubernetes ' +
-        'extension runs kubectl on Windows, or with "vs-kubernetes.use-wsl" in the default WSL ' +
-        `distribution. ${set}, or attach from the command palette ("Attach to Running Kubernetes ` +
-        'Container...").',
+      `${kubectlIn(scope.wsl)} has no current Kubernetes context in ${file ?? 'its default kubeconfig'}, ` +
+        'so it does not know the cluster of the Kubernetes explorer, which may read another ' +
+        'kubeconfig ("dev.containers.kubeconfigPath" takes precedence over the Kubernetes ' +
+        "extension's setting here). " +
+        (platform === 'win32'
+          ? 'The Kubernetes extension also runs kubectl on Windows, or with ' +
+            '"vs-kubernetes.use-wsl" in the default WSL distribution. '
+          : '') +
+        `${set}, or attach from the command palette ("Attach to Running Kubernetes Container...").`,
     );
   }
   return new DevContainerError(
     'CONFIG_INVALID',
-    `This window names no Kubernetes context, and ${kubectlIn(scope.wsl)} has no current one. ` +
-      `${set}, or attach to the pod again.`,
+    `This window names no Kubernetes context, and ${kubectlIn(scope.wsl)} has no current one` +
+      `${file === undefined ? '' : ` in ${file}`}. ${set}, or attach to the pod again.`,
   );
 }
 
@@ -388,8 +424,10 @@ export class Kubectl {
     return name === '' ? undefined : name;
   }
 
-  async contexts(): Promise<string[]> {
-    return (await this.run('config get-contexts', ['config', 'get-contexts', '--output=name']))
+  async contexts(scope: KubectlScope = this.current()): Promise<string[]> {
+    return (
+      await this.runWith(scope, 'config get-contexts', ['config', 'get-contexts', '--output=name'])
+    )
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '');

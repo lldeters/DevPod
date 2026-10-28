@@ -412,28 +412,92 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       expect(launched.every((mode) => JSON.stringify(mode) === JSON.stringify(wsl))).toBe(true);
     });
 
-    it('fixes a target without a context to the current one for this connection', async () => {
+    it('fixes a target without a context to the current one, also for the connection and tunnels', async () => {
       await stub.set('current-context', 'other');
       const { resolver, logger } = createResolver();
       const { context: _context, ...withoutContext } = ref;
-      await resolver.resolve(encodePodAuthority(withoutContext));
+      const resolved = (await resolver.resolve(
+        encodePodAuthority(withoutContext),
+      )) as unknown as Resolved;
+      // switching contexts later must not redirect this connection
+      await stub.set('current-context', 'changed');
+
+      const connection = (await resolved.makeConnection()) as {
+        onDidReceiveMessage: (listener: (data: Uint8Array) => void) => unknown;
+        send: (data: Uint8Array) => void;
+        end: () => void;
+      };
+      const echoed = new Promise<string>((resolve) => {
+        connection.onDidReceiveMessage((data) => resolve(Buffer.from(data).toString()));
+      });
+      connection.send(Buffer.from('pinned'));
+      expect(await echoed).toBe('pinned');
+      connection.end();
+      const remote = await startEcho();
+      const tunnel = await callLikeTheIde(resolver.tunnelFactory, {
+        remoteAddress: { host: 'localhost', port: remote },
+      });
+      const local = (tunnel.localAddress as { port: number }).port;
+      expect(await echoThrough(local, 'tunnel')).toBe('tunnel');
+      await tunnel.dispose();
 
       const execs = (await stub.calls()).filter((args) => args.includes('exec'));
-      expect(execs.length).toBeGreaterThan(0);
+      const bridges = execs.filter((args) => args.includes('-e'));
+      expect(bridges.length).toBeGreaterThanOrEqual(2); // the connection and the tunnel
       expect(execs.every((args) => args.includes('--context=other'))).toBe(true);
       expect(logger.entries.map((e) => e.message)).toContain(
         'The target names no context; using the current one, other',
       );
     });
 
+    it('reads the current context with the kubeconfig and WSL selection of the window', async () => {
+      await stub.set('current-context', 'window-context');
+      const launched: unknown[] = [];
+      const launcher = (wsl: unknown) => {
+        launched.push(wsl);
+        return { kubectl: stub.path }; // the stub stands in for kubectl in WSL
+      };
+      const resolver = new PodResolver({
+        logger: new MemoryLogger(),
+        kubectl: new Kubectl(launcher, () => ({ kubeconfig: '/k/settings' })),
+        kubectlLauncher: launcher,
+        targets: allKnown,
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const { context: _context, ...withoutContext } = ref;
+      const wsl = { distro: 'Ubuntu-24.04' };
+      await resolver.resolve(
+        encodePodAuthority({ ...withoutContext, kubeconfig: '/k/window', wsl }),
+      );
+
+      const calls = await stub.calls();
+      const lookup = calls.find((args) => args.some((arg) => arg.includes('{.current-context}')));
+      expect(lookup?.[0]).toBe('--kubeconfig=/k/window');
+      expect(calls.every((args) => !args.includes('--kubeconfig=/k/settings'))).toBe(true);
+      expect(launched.every((mode) => JSON.stringify(mode) === JSON.stringify(wsl))).toBe(true);
+    });
+
     it('refuses a target without a context when there is no current one', async () => {
+      await stub.set('contexts', 'ctx-a\nctx-b\n');
       const { resolver } = createResolver();
       const { context: _context, ...withoutContext } = ref;
       await expect(resolver.resolve(encodePodAuthority(withoutContext))).rejects.toMatchObject({
         kind: 'NotAvailable',
-        message: expect.stringMatching(/This window names no Kubernetes context/),
+        message: expect.stringMatching(/^This window names no Kubernetes context/),
       });
       expect((await stub.calls()).some((args) => args.includes('pod'))).toBe(false);
+    });
+
+    it('says that no kubeconfig was found for a target without a context and no contexts', async () => {
+      const { resolver } = createResolver();
+      const { context: _context, ...withoutContext } = ref;
+      await expect(resolver.resolve(encodePodAuthority(withoutContext))).rejects.toMatchObject({
+        kind: 'NotAvailable',
+        message: expect.stringMatching(/^kubectl found no Kubernetes context/),
+      });
     });
 
     it('rejects an invalid authority without calling kubectl', async () => {

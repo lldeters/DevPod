@@ -29,8 +29,9 @@
     else created (possible where others may write to the home directory) is refused.
   - The connection token is checked before the server starts.
   - Two connections at once no longer remove each other's setup lock. Where `flock` is available and
-    works on the file system, it serializes the setup instead of a lock directory, so a setup that
-    was interrupted can no longer let two later ones run at the same time.
+    works on the file system, it serializes the setup as well, so a setup that was interrupted can
+    no longer let two later ones run at the same time. The lock directory is still taken too, so
+    windows that still run an older version of this extension wait as before.
   - The Kiro sign-in and the machine settings are written through a new file with an unpredictable
     name, and the settings are private to the user like the rest of the server's folder.
   - The log and error messages show the download address without user name, password and query,
@@ -41,8 +42,9 @@
 - On Windows, `wsl.exe` is always taken from an absolute system folder, also when `SystemRoot` is
   empty or not an absolute path.
 - At most 200 ports are forwarded at once per window; further requests are refused and logged.
-- When the server download fails in a container with Alpine Linux or 32-bit ARM, the message says
-  that Kiro publishes its server for Linux with glibc on x64 and arm64 only.
+- When the server download from Kiro's download server fails in a container with Alpine Linux or
+  32-bit ARM, the message says that Kiro publishes its server for Linux with glibc on x64 and arm64
+  only. The README names the glibc version the server needs.
 
 ## 0.2.0 (2026-10-27)
 

@@ -473,19 +473,6 @@ cp "$WGET_SOURCE" "$out"
     });
 
     it.skipIf(!hasFlock)(
-      'is not held up by a lock directory left behind, where flock works',
-      async () => {
-        // A lock directory without owner, as a run killed right after creating it leaves behind;
-        // the lock directory alone would wait a minute before taking it over.
-        await mkdir(path.join(root(), 'setup.lock'), { recursive: true });
-        const started = Date.now();
-        const result = await install(WITH_FLOCK);
-        expect(parseInstallResult(result.stdout).port).toBe(45678);
-        expect(Date.now() - started).toBeLessThan(10_000);
-      },
-    );
-
-    it.skipIf(!hasFlock)(
       'is not held up by a download that a killed run left running',
       async () => {
         // A curl that hangs; it records its PID so that it can be stopped afterwards.
@@ -516,28 +503,63 @@ cp "$WGET_SOURCE" "$out"
       },
     );
 
-    it('takes over a lock directory whose owner is gone', async () => {
+    const MODES = [
+      ...(hasFlock ? [['with flock', WITH_FLOCK] as const] : []),
+      ['without flock', WITHOUT_FLOCK] as const,
+    ];
+
+    it.each(MODES)(
+      'waits for a run that holds only the lock directory, as older versions do (%s)',
+      async (_, tools) => {
+        // The holder stands in for a run of a version that knows only the lock directory, in a
+        // window that was not reloaded after an update.
+        const holder = spawn('sleep', ['30'], { stdio: 'ignore' });
+        try {
+          const lock = path.join(root(), 'setup.lock');
+          await mkdir(lock, { recursive: true });
+          await writeFile(path.join(lock, 'owner'), `${holder.pid}\n`);
+          const running = install(tools);
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          await expect(stat(path.join(root(), 'bin', commit))).rejects.toThrow(); // still waiting
+          holder.kill('SIGKILL');
+          expect(parseInstallResult((await running).stdout).port).toBe(45678);
+        } finally {
+          holder.kill('SIGKILL');
+        }
+      },
+    );
+
+    it.each(MODES)('takes over a lock directory whose owner is gone (%s)', async (_, tools) => {
       const lock = path.join(root(), 'setup.lock');
       await mkdir(lock, { recursive: true });
       const gone = spawnSync('sh', ['-c', 'echo $$']).stdout.toString().trim();
       await writeFile(path.join(lock, 'owner'), `${gone} 1\n`);
-      const result = await install(WITHOUT_FLOCK);
+      const result = await install(tools);
       expect(parseInstallResult(result.stdout).port).toBe(45678);
       await expect(readFile(path.join(lock, 'owner'), 'utf8')).rejects.toThrow(); // released
     });
 
-    it('leaves a lock directory alone that another run took over meanwhile', async () => {
-      // A launcher that takes the lock over while this run still holds it, as a second run would.
-      const launcher = path.join(work, 'src', 'fake-server-linux-x64', 'bin', 'fake-server');
-      await writeFile(
-        launcher,
-        '#!/bin/sh\necho "1 1" > "$(dirname "$0")/../../../setup.lock/owner"\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
-      );
-      execFileSync('tar', ['-czf', archive, '-C', path.join(work, 'src'), 'fake-server-linux-x64']);
-      const result = await install(WITHOUT_FLOCK);
-      expect(parseInstallResult(result.stdout).port).toBe(45678);
-      expect(await readFile(path.join(root(), 'setup.lock', 'owner'), 'utf8')).toBe('1 1\n');
-    });
+    it.each(MODES)(
+      'leaves a lock directory alone that another run took over meanwhile (%s)',
+      async (_, tools) => {
+        // A launcher that takes the lock over while this run still holds it, as a second run would.
+        const launcher = path.join(work, 'src', 'fake-server-linux-x64', 'bin', 'fake-server');
+        await writeFile(
+          launcher,
+          '#!/bin/sh\necho "1 1" > "$(dirname "$0")/../../../setup.lock/owner"\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
+        );
+        execFileSync('tar', [
+          '-czf',
+          archive,
+          '-C',
+          path.join(work, 'src'),
+          'fake-server-linux-x64',
+        ]);
+        const result = await install(tools);
+        expect(parseInstallResult(result.stdout).port).toBe(45678);
+        expect(await readFile(path.join(root(), 'setup.lock', 'owner'), 'utf8')).toBe('1 1\n');
+      },
+    );
   });
 
   it('installs in a home directory everyone may write to, such as an emptyDir volume', async () => {

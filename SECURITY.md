@@ -25,7 +25,9 @@ steps to reproduce and the impact you see.
 - This machine's Kiro sign-in is copied into a container or pod only after the user agrees in a
   dialog (default, `dev.containers.shareKiroLogin: "ask"`), and only if the container has none.
 - The IDE server is downloaded over `https` only (or from a file inside the container), also after
-  redirects. In the fallback folder used when the home directory is not writable, the server is
+  redirects. Kiro publishes no checksum or signature for its server archives (only for its desktop
+  builds), so the archive is trusted on the strength of that connection, as in Kiro's own remote
+  installer. In the fallback folder used when the home directory is not writable, the server is
   installed only if that folder belongs to the user, and in the home directory only if the server's
   own folder does (someone else could have created it where others may write to the home directory,
   as to an `emptyDir` volume).

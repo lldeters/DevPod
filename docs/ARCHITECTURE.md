@@ -44,10 +44,13 @@ src/ui/       Commands, status bar item, reopen prompt, setup of argv.json, logg
    may connect at once: with `flock` on `setup.flock` where it works on that file system (the kernel
    releases it when a run ends, however it ends; the download, unpacking and the server are started
    without its descriptor, so they cannot keep it), else with a lock directory (`setup.lock`, owner
-   recorded, taken over when the owner is gone). The download must be `https` (or `file`), also after redirects: `curl`
-   refuses others (`--proto-redir`); with `wget`, its response headers (`-S`) are checked and a
-   `Location` that is neither `https://` nor a path fails the download, and a `wget` that shows no
-   headers on stderr (Wget2) is refused.
+   recorded, taken over when the owner is gone). The download must be `https` (or `file`), also
+   after redirects: `curl` refuses others (`--proto-redir`); with `wget`, its response headers
+   (`-S`) are checked and a `Location` that is neither `https://` nor a path fails the download,
+   and a `wget` that shows no headers on stderr (Wget2) is refused. Kiro publishes no checksum or
+   signature for server archives (`docs/REVIEW-2026-10-27.md`), so there is nothing to verify the
+   archive against. Kiro builds the server for Linux with glibc on x64 and arm64 only; a failed
+   download on Alpine or 32-bit ARM says so.
 4. **Connection**: each connection spawns `docker exec -i … <container node> -e <bridge> <port>`
    which relays stdio to the server's loopback port. No port is published on the host. The bridge
    exits only once stdout has taken everything, so the end of a stream is not cut off.

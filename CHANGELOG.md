@@ -41,6 +41,8 @@
 - On Windows, `wsl.exe` is always taken from an absolute system folder, also when `SystemRoot` is
   empty or not an absolute path.
 - At most 200 ports are forwarded at once per window; further requests are refused and logged.
+- When the server download fails in a container with Alpine Linux or 32-bit ARM, the message says
+  that Kiro publishes its server for Linux with glibc on x64 and arm64 only.
 
 ## 0.2.0 (2026-10-27)
 

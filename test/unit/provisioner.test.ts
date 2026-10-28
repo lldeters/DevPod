@@ -122,7 +122,51 @@ describe('provisionServer', () => {
       ),
     ).rejects.toMatchObject({
       code: 'SERVER_INSTALL_FAILED',
-      message: expect.stringContaining('download failed'),
+      message: expect.not.stringContaining('Kiro publishes'),
+    });
+  });
+
+  describe('on a platform Kiro publishes no server for', () => {
+    const platform = (machine: string, libc: string) =>
+      ok(
+        `${PLATFORM_MARKER}: start\nkernel==Linux\nmachine==${machine}\nlibc==${libc}\nhome==/home/vscode\n${PLATFORM_MARKER}: end\n`,
+      );
+    const failed = (error: string): RunResult => ({
+      code: 1,
+      signal: null,
+      stdout: `${INSTALL_MARKER}: start\nerror==${error}\n${INSTALL_MARKER}: end\n`,
+      stderr: '',
+    });
+    const install = (machine: string, libc: string, error: string, urlTemplate?: string) =>
+      provisionServer(
+        fakeExecutor([platform(machine, libc), failed(error)]),
+        { containerId: 'c1', user: 'u', build, ...(urlTemplate ? { urlTemplate } : {}) },
+        new MemoryLogger(),
+      );
+
+    it.each([
+      ['x86_64', 'musl', 'alpine-x64 (Alpine Linux, which uses musl)'],
+      ['aarch64', 'musl', 'alpine-arm64 (Alpine Linux, which uses musl)'],
+      ['armv7l', 'gnu', 'linux-armhf (32-bit ARM)'],
+    ])('says why a download from Kiro failed (%s, %s)', async (machine, libc, platformText) => {
+      await expect(
+        install(machine, libc, 'download failed: https://dl.example/x'),
+      ).rejects.toMatchObject({
+        code: 'SERVER_INSTALL_FAILED',
+        message:
+          'download failed: https://dl.example/x. Kiro publishes its server for Linux with glibc ' +
+          `on x64 and arm64 only; this container is ${platformText}.`,
+      });
+    });
+
+    it('says nothing about Kiro for another address or another failure', async () => {
+      const own = 'https://mirror.example/${commit}/${os}-${arch}.tar.gz';
+      await expect(
+        install('x86_64', 'musl', 'download failed: https://mirror.example/x', own),
+      ).rejects.toMatchObject({ message: 'download failed: https://mirror.example/x' });
+      await expect(install('x86_64', 'musl', 'extraction failed')).rejects.toMatchObject({
+        message: 'extraction failed',
+      });
     });
   });
 

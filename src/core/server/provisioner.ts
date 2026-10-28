@@ -6,6 +6,7 @@ import type { ExecOptions } from '../engine/containerEngine';
 import type { Logger } from '../logger';
 import type { RunResult } from '../process';
 import { detectPlatformScript, parsePlatform } from './platform';
+import type { ContainerPlatform } from './platform';
 import type { ServerBuildInfo } from './productInfo';
 import {
   buildLoginStatusScript,
@@ -193,6 +194,20 @@ async function shareKiroLogin(
 }
 
 /**
+ * Why a download from the IDE's own address may fail on `platform`: Kiro publishes its server for
+ * Linux with glibc on x64 and arm64 only (as its download server showed in October 2026), not for
+ * Alpine Linux or 32-bit ARM. Empty for the platforms it publishes.
+ */
+function missingBuildHint(platform: ContainerPlatform): string {
+  if (platform.os === 'linux' && platform.arch !== 'armhf') return '';
+  const what = platform.os === 'alpine' ? 'Alpine Linux, which uses musl' : '32-bit ARM';
+  return (
+    ' Kiro publishes its server for Linux with glibc on x64 and arm64 only; this container is ' +
+    `${platform.os}-${platform.arch} (${what}).`
+  );
+}
+
+/**
  * Makes sure a server matching the IDE is installed and running inside the container, and returns
  * how to reach it. Safe to call repeatedly: an installed, running server is reused.
  */
@@ -242,7 +257,16 @@ export async function provisionServer(
     'install',
     signal,
   );
-  const installed = parseInstallResult(output);
+  let installed: InstallResult;
+  try {
+    installed = parseInstallResult(output);
+  } catch (error) {
+    const hint = template === input.build.downloadUrlTemplate ? missingBuildHint(platform) : '';
+    if (hint && error instanceof DevContainerError && error.message.startsWith('download failed')) {
+      throw new DevContainerError(error.code, `${error.message}.${hint}`, { cause: error });
+    }
+    throw error;
+  }
   logger.log('info', `IDE server listening on 127.0.0.1:${installed.port} in the container`);
   return installed;
 }

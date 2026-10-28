@@ -12,7 +12,8 @@
   apply to all profiles. A value you set in another profile is no longer used; set it again (the
   Settings editor now stores it in the Default profile).
 - Forwarded ports no longer cut off the end of a response when the client reads more slowly than
-  the container sends, and answer clients that end their side right after the request.
+  the container sends, and answer clients that end their side right after the request (also when
+  `localhost` in the container resolves to `::1` first and the service listens on IPv4 only).
 - Error messages and progress notifications no longer turn `[text](link)` in the output of a
   container, a pod, kubectl or the Dev Container CLI into a clickable link.
 - The log masks the values of more variables that usually hold secrets (names with `passphrase`,

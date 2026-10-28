@@ -54,7 +54,8 @@ bug reports are welcome in the [issue tracker](https://github.com/lldeters/DevPo
 
 - Kiro (a VS Code 1.103 based build) on Linux, macOS or Windows.
 - Docker or Podman, running, usable without `sudo`.
-- Linux containers on x64 or arm64, with `curl` or `wget`, and `tar`.
+- Linux containers on x64 or arm64 with glibc, with `curl` or `wget`, and `tar`. Kiro publishes no
+  server for Alpine Linux (musl) or 32-bit ARM.
 
 ## Setup
 
@@ -127,7 +128,7 @@ in the original extension.
 - Use **File > Open Folder** in the new window to open a folder of the pod.
 
 What the pod needs: a running container with `sh`, `curl` or `wget`, and `tar`, on Linux x64 or
-arm64. The IDE server is installed in the user's home directory, or, if that is not writable, in
+arm64 with glibc. The IDE server is installed in the user's home directory, or, if that is not writable, in
 the private folder `devcontainers-kiro-<uid>` of `$TMPDIR` (or `/tmp`); that folder is refused unless
 it is a directory the user owns, and the server's own folder in the home directory must belong to
 the user too. It is not part of the pod's image, so it is installed again after

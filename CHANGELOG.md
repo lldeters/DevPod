@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (2026-10-28)
+## 0.2.3 (2026-10-28)
 
 - **Sign-ins of kubectl in WSL open in the Windows browser**: web pages that credential plugins
   (`kubectl oidc-login`, `kubelogin`) open go to the Windows default browser, with the certificates

@@ -157,6 +157,12 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
             `Ignoring extension entries that are not plain ids: ${customizations.rejectedExtensions.join(', ')}`,
           );
         }
+        if (customizations.ignoredSettings.length > 0) {
+          logger.log(
+            'warn',
+            `Ignoring settings of this extension in the configuration; they count only in the user settings of this machine: ${customizations.ignoredSettings.join(', ')}`,
+          );
+        }
         if (customizations.extensions.length > 0) {
           logger.log(
             'info',

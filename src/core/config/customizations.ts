@@ -33,6 +33,17 @@ export interface IdeCustomizations {
   settings: Record<string, unknown>;
   /** Entries that are not plain extension ids (for example with a version); reported, not used. */
   rejectedExtensions: string[];
+  /**
+   * Settings of this extension (`dev.containers.*`, also written as an object). They decide what
+   * runs on this machine and count only in the local user settings, so they are reported instead
+   * of being written into the container.
+   */
+  ignoredSettings: string[];
+}
+
+/** A key that sets this extension's settings, as `dev.containers.<name>` or as a section object. */
+function isOwnSetting(key: string): boolean {
+  return key === 'dev' || key === 'dev.containers' || key.startsWith('dev.containers.');
 }
 
 /**
@@ -45,6 +56,7 @@ export function extractCustomizations(config: Record<string, unknown>): IdeCusto
 
   const extensions: string[] = [];
   const rejectedExtensions: string[] = [];
+  const ignoredSettings: string[] = [];
   const seen = new Set<string>();
   const settings: Record<string, unknown> = {};
 
@@ -62,10 +74,16 @@ export function extractCustomizations(config: Record<string, unknown>): IdeCusto
       }
     }
     if (isRecord(source['settings'])) {
-      Object.assign(settings, source['settings']);
+      for (const [key, value] of Object.entries(source['settings'])) {
+        if (!isOwnSetting(key)) {
+          settings[key] = value;
+        } else if (!ignoredSettings.includes(key)) {
+          ignoredSettings.push(key);
+        }
+      }
     }
   }
-  return { extensions, settings, rejectedExtensions };
+  return { extensions, settings, rejectedExtensions, ignoredSettings };
 }
 
 /** A port to forward, as host and port inside the container's network. */

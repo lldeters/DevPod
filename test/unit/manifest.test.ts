@@ -92,20 +92,33 @@ describe('manifest', () => {
     );
   });
 
-  it('lets only the user decide where kubectl runs, never a workspace', () => {
+  it('lets only the user decide which programs and paths are used, never a workspace or container', () => {
+    // Scope `application`: only the local user settings count. With `machine`, a container or pod
+    // window would take the value from the settings on the container side.
     const properties = manifest.contributes.configuration.properties;
     for (const key of [
+      'dev.containers.dockerPath',
+      'dev.containers.dockerComposePath',
+      'dev.containers.devcontainerCliPath',
+      'dev.containers.serverDownloadUrlTemplate',
       'dev.containers.kubectlPath',
       'dev.containers.kubeconfigPath',
       'dev.containers.kubectlInWSL',
       'dev.containers.kubectlWSLDistro',
     ]) {
-      expect(properties[key], key).toMatchObject({ scope: 'machine' });
+      // Paths of this machine: kept out of Settings Sync, as they were with scope `machine`.
+      expect(properties[key], key).toMatchObject({ scope: 'application', ignoreSync: true });
     }
     expect(properties['dev.containers.kubectlInWSL']).toMatchObject({
       type: 'boolean',
       default: false,
     });
+  });
+
+  it('has no setting with scope machine, which remote windows read from the remote side', () => {
+    for (const [key, value] of Object.entries(manifest.contributes.configuration.properties)) {
+      expect((value as { scope?: string }).scope, key).not.toBe('machine');
+    }
   });
 });
 

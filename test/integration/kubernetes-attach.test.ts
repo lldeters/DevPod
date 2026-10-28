@@ -400,6 +400,27 @@ describe('which kubectl and kubeconfig are used', () => {
     expect(effectiveKubeconfig()).toBe('/home/me/.kube/config');
   });
 
+  it("uses only this machine's Kubernetes settings in a container or pod window", () => {
+    state.remoteName = 'k8s-pod';
+    state.settings['vscode-kubernetes.kubectl-path'] = '/usr/local/bin/kubectl';
+    expect(effectiveKubectlPath()).toBe('/usr/local/bin/kubectl');
+    state.remoteSettings['vscode-kubernetes.kubectl-path'] = '/elsewhere/kubectl';
+    state.remoteSettings['dev.containers.kubectlPath'] = '/elsewhere/own-kubectl';
+    state.remoteSettings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': '/elsewhere/config' };
+    state.remoteSettings['dev.containers.kubeconfigPath'] = '/elsewhere/own-config';
+    expect(effectiveKubectlPath()).toBe('/usr/local/bin/kubectl');
+    expect(effectiveKubeconfig()).toBeUndefined();
+  });
+
+  it('lets no container or pod turn on WSL', () => {
+    state.remoteName = 'k8s-pod';
+    state.remoteSettings['dev.containers.kubectlInWSL'] = true;
+    state.remoteSettings['vs-kubernetes.use-wsl'] = true;
+    expect(effectiveWsl('win32')).toBeUndefined();
+    state.settings['dev.containers.kubectlInWSL'] = true;
+    expect(effectiveWsl('win32')).toEqual({});
+  });
+
   it('runs kubectl directly by default, and never in WSL outside Windows', () => {
     expect(effectiveWsl('win32')).toBeUndefined();
     state.settings['dev.containers.kubectlInWSL'] = true;

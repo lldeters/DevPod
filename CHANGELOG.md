@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The settings for programs and paths (`dockerPath`, `dockerComposePath`, `devcontainerCliPath`,
+  `serverDownloadUrlTemplate`, `kubectlPath`, `kubeconfigPath`, `kubectlInWSL`,
+  `kubectlWSLDistro`, `kubectlWSLBrowser`) now have scope `application`. With scope `machine`, a container or pod window
+  ignored the values from the user settings (for example `podman`) and took them from the settings
+  inside the container instead. They, and `shareKiroLogin`, are read from the user settings of this
+  machine only; such settings in a `devcontainer.json` are reported in the log and not applied.
+
 ## 0.2.3 (2026-10-28)
 
 - **Sign-ins of kubectl in WSL open in the Windows browser**: web pages that credential plugins

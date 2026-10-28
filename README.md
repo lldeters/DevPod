@@ -105,6 +105,10 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | `dev.containers.kubectlWSLBrowser`         | `windows` | Where sign-in pages of kubectl in WSL open: `windows` or `wsl`.           |
 | `dev.containers.shareKiroLogin`            | `ask`     | Copy this machine's Kiro sign-in into containers and pods (see below).    |
 
+Except for `logLevel` and `promptToReopen`, these settings can only be set in the user settings.
+They apply to this machine, also in container and pod windows, and are never taken from a
+workspace, from a `devcontainer.json` or from the settings inside a container.
+
 ## Kubernetes pods
 
 **Attach to Kiro** opens a window in a container of a running pod, like _Attach Visual Studio Code_

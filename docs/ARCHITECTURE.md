@@ -223,10 +223,14 @@ which `node` the bridge uses (the server's bundled one if present, else the cont
 - Values of `-e`, `--env`, `--build-arg` and `--remote-env` in logged command lines are masked, and
   so are the values of the CLI's environment variables whose names look like secrets (at least 8
   characters), in every log line, progress message and error message from the CLI.
-- The kubectl path and kubeconfig taken over from the Kubernetes extension are read from the user
-  settings only (`inspect().globalValue`), so a workspace cannot choose a program or kubeconfig.
-  The same holds for whether kubectl runs in WSL (`dev.containers.kubectlInWSL`, the Kubernetes
-  extension's `use-wsl`).
+- Settings that choose a program, a kubeconfig, whether kubectl runs in WSL or whether the Kiro
+  sign-in is shared have scope `application` and are read from the user's layer of `inspect()`
+  only (`userValue` in `src/ui/settings.ts`), so a workspace cannot set them. A remote window
+  takes `machine` settings from the remote side, and the IDE applies scopes only to keys it knows
+  (a section written as an object passes), so in a container or pod window a value that comes
+  from the remote side is ignored. The same holds for the Kubernetes extension's settings used as
+  a fallback (`kubectl-path`, `kubeconfig`, `use-wsl`). `dev.containers.*` settings in a
+  `devcontainer.json` are reported and not written into the container.
 - kubectl in WSL runs with `wsl.exe --exec`, never through the distribution's default shell; batch
   files (`.cmd`, `.bat`) are not supported as kubectl, since starting them needs `cmd.exe` and its
   quoting rules.

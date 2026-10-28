@@ -109,7 +109,9 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 
 Except for `logLevel` and `promptToReopen`, these settings can only be set in the user settings.
 They apply to this machine, also in container and pod windows, and are never taken from a
-workspace, from a `devcontainer.json` or from the settings inside a container.
+workspace, from a `devcontainer.json` or from the settings inside a container. Like every setting
+that only the user settings can hold, they are kept in the settings of the Default profile and apply
+to all profiles.
 
 ## Kubernetes pods
 

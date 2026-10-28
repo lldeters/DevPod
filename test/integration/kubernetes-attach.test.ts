@@ -16,6 +16,7 @@ import {
   effectiveKubectlScope,
   effectiveWsl,
   kubectlLauncher,
+  wslSetting,
 } from '../../src/ui/kubernetes';
 import type { AttachDependencies, ExplorerTarget } from '../../src/ui/kubernetes';
 import * as mock from '../helpers/vscodeMock';
@@ -400,7 +401,7 @@ describe('which kubectl and kubeconfig are used', () => {
     expect(effectiveKubeconfig()).toBe('/home/me/.kube/config');
   });
 
-  it("uses only this machine's Kubernetes settings in a container or pod window", () => {
+  it('takes no Kubernetes setting from the container side in a pod window', () => {
     state.remoteName = 'k8s-pod';
     state.settings['vscode-kubernetes.kubectl-path'] = '/usr/local/bin/kubectl';
     expect(effectiveKubectlPath()).toBe('/usr/local/bin/kubectl');
@@ -419,6 +420,15 @@ describe('which kubectl and kubeconfig are used', () => {
     expect(effectiveWsl('win32')).toBeUndefined();
     state.settings['dev.containers.kubectlInWSL'] = true;
     expect(effectiveWsl('win32')).toEqual({});
+  });
+
+  it('takes only a boolean for kubectlInWSL, so the string "false" does not turn WSL on', () => {
+    state.settings['dev.containers.kubectlInWSL'] = 'false';
+    expect(wslSetting('win32')).toBeUndefined();
+    expect(effectiveWsl('win32')).toBeUndefined();
+    // Not a boolean, so the Kubernetes extension's setting decides.
+    state.settings['vs-kubernetes.use-wsl'] = true;
+    expect(wslSetting('win32')).toBe('vs-kubernetes.use-wsl');
   });
 
   it('runs kubectl directly by default, and never in WSL outside Windows', () => {

@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LOCAL_ONLY_SETTINGS } from '../../src/core/config/customizations';
 import { Commands } from '../../src/ui/commands';
 
 interface Menu {
@@ -113,6 +114,13 @@ describe('manifest', () => {
       type: 'boolean',
       default: false,
     });
+  });
+
+  it('keeps from a devcontainer.json exactly the settings with scope application', () => {
+    const application = Object.entries(manifest.contributes.configuration.properties)
+      .filter(([, value]) => (value as { scope?: string }).scope === 'application')
+      .map(([key]) => key);
+    expect([...LOCAL_ONLY_SETTINGS].sort()).toEqual(application.sort());
   });
 
   it('has no setting with scope machine, which remote windows read from the remote side', () => {

@@ -72,6 +72,35 @@ describe('readSettings', () => {
     });
   });
 
+  it('ignores the settings written as an object on the container side', () => {
+    mock.state.remoteName = 'dev-container';
+    mock.state.remoteSettings['dev.containers'] = {
+      dockerPath: '/elsewhere/docker',
+      shareKiroLogin: 'always',
+    };
+    expect(readSettings()).toMatchObject({ dockerPath: 'docker', shareKiroLogin: 'ask' });
+    mock.state.settings['dev.containers.dockerPath'] = 'podman';
+    expect(readSettings().dockerPath).toBe('podman');
+  });
+
+  it('keeps the user values that the container side erases', () => {
+    mock.state.remoteName = 'k8s-pod';
+    mock.state.settings['dev.containers.dockerPath'] = 'podman';
+    mock.state.settings['dev.containers.shareKiroLogin'] = 'never';
+    for (const erase of [{ 'dev.containers': null }, { dev: 0 }]) {
+      mock.state.remoteSettings = erase;
+      expect(readSettings(), JSON.stringify(erase)).toMatchObject({
+        dockerPath: 'podman',
+        shareKiroLogin: 'never',
+      });
+    }
+  });
+
+  it('ignores a workspace that writes the settings as an object', () => {
+    mock.state.workspaceSettings['dev.containers'] = { dockerPath: '/workspace/docker' };
+    expect(readSettings().dockerPath).toBe('docker');
+  });
+
   it('falls back to the defaults for values of the wrong type or an unknown log level', () => {
     mock.state.settings['dev.containers.dockerPath'] = 5;
     mock.state.settings['dev.containers.kubectlPath'] = { path: '/x' };

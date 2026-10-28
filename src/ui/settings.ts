@@ -36,15 +36,19 @@ interface Inspection<T> {
  * neither a workspace nor the settings on the side of a container or pod. This extension declares
  * them with scope `application`, but the IDE applies scopes only to the keys it knows: a section
  * written as an object (`"dev.containers": { ... }`) passes that filter. So only the user's layer
- * counts, and in a remote window, where that layer also holds the remote side's settings, only
- * this machine's value once the remote side has one.
+ * counts. In a remote window that layer also holds the remote side's settings, which can set a
+ * value and also erase one (`"dev.containers": null`), so this machine's value comes first there,
+ * and a value only the remote side has is not used.
  */
 export function userValue<T>(section: string | undefined, key: string): T | undefined {
   const inspected = vscode.workspace.getConfiguration(section).inspect<T>(key) as
     Inspection<T> | undefined;
-  if (vscode.env.remoteName !== undefined && inspected?.globalRemoteValue !== undefined) {
-    return inspected.globalLocalValue;
+  if (vscode.env.remoteName !== undefined) {
+    if (inspected?.globalLocalValue !== undefined) return inspected.globalLocalValue;
+    if (inspected?.globalRemoteValue !== undefined) return undefined;
   }
+  // Also the user settings of the default profile, which hold the scope-`application` settings
+  // when another profile is active.
   return inspected?.globalValue;
 }
 

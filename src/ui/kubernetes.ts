@@ -110,7 +110,9 @@ export function wslSetting(
   platform: NodeJS.Platform = process.platform,
 ): 'dev.containers.kubectlInWSL' | 'vs-kubernetes.use-wsl' | undefined {
   if (platform !== 'win32') return undefined;
-  const own = userValue<boolean>('dev.containers', 'kubectlInWSL');
+  // Only a boolean counts: the string "false" would otherwise turn WSL on.
+  const raw = userValue<unknown>('dev.containers', 'kubectlInWSL');
+  const own = typeof raw === 'boolean' ? raw : undefined;
   if (own !== undefined) return own ? 'dev.containers.kubectlInWSL' : undefined;
   return userValue<unknown>(undefined, 'vs-kubernetes.use-wsl') === true
     ? 'vs-kubernetes.use-wsl'

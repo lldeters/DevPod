@@ -164,7 +164,7 @@ export class DevContainerResolver implements vscode.RemoteAuthorityResolver, vsc
         if (customizations.ignoredSettings.length > 0) {
           logger.log(
             'warn',
-            `Ignoring settings of this extension in the configuration; they count only in the user settings of this machine: ${customizations.ignoredSettings.join(', ')}`,
+            `Ignoring settings in the configuration that only the user settings of this machine can set: ${customizations.ignoredSettings.join(', ')}`,
           );
         }
         if (customizations.extensions.length > 0) {

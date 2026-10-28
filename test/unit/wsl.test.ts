@@ -167,6 +167,12 @@ describe('starting kubectl', () => {
     expect(wslExecutable({ SystemRoot: 'D:\\Win' })).toBe('D:\\Win\\System32\\wsl.exe');
     expect(wslExecutable({})).toBe('C:\\Windows\\System32\\wsl.exe');
     expect(windowsRoot({ SystemRoot: 'D:\\Win' })).toBe('D:\\Win');
+    for (const unusable of ['', 'Windows', 'System32\\..', '\\\\host\\share', 'C:']) {
+      expect(wslExecutable({ SystemRoot: unusable }), unusable).toBe(
+        'C:\\Windows\\System32\\wsl.exe',
+      );
+      expect(windowsRoot({ SystemRoot: unusable }), unusable).toBe('C:\\Windows');
+    }
   });
 
   it('runs pod commands in WSL too, with the command as separate arguments', () => {

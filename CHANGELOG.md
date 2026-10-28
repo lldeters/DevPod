@@ -28,6 +28,8 @@
 - `${release}` is no longer listed as a placeholder of `dev.containers.serverDownloadUrlTemplate`:
   no IDE build provides a value for it, so a template with it always failed. It is now reported as
   an unknown placeholder.
+- On Windows, `wsl.exe`, and the Windows browser that sign-ins of kubectl in WSL open, are always
+  taken from an absolute system folder, also when `SystemRoot` is empty or not an absolute path.
 
 ## 0.2.3 (2026-10-28)
 

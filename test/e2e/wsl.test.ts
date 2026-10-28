@@ -159,7 +159,15 @@ describe.skipIf(!enabled)('kubectl in WSL end to end', () => {
       () => undefined,
       (failure: unknown) => failure as Error,
     );
-    expect(error?.message).toMatch(/^kubectl config \(in WSL \(NoSuchDistro\)\) failed: \S/);
+    // Shown in the job log: the exact text depends on the WSL version on the runner.
+    console.log(`Message for a missing distribution: ${error?.message}`);
+    expect(error?.message).toMatch(/NoSuchDistro/);
+    // Current WSL prints the code WSL_E_DISTRO_NOT_FOUND, which gets this extension's own message;
+    // older versions print only a sentence, which is passed on.
+    expect(error?.message).toMatch(
+      /WSL has no distribution named "NoSuchDistro" \(WSL_E_DISTRO_NOT_FOUND\)|failed: .*distribution/i,
+    );
     expect(error?.message).not.toContain('\0');
+    expect(error?.message).not.toContain('\uFFFD'); // WSL_UTF8=1: no garbled characters
   });
 });

@@ -10,6 +10,8 @@ import { DevContainerError } from '../../src/core/errors';
 import {
   KubectlTarget,
   kubectlExecArgs,
+  noContextError,
+  noCurrentContextError,
   notStartedMessage,
   queryFailure,
 } from '../../src/core/k8s/kubectl';
@@ -248,6 +250,134 @@ describe('error messages', () => {
     });
     expect(error.message).toBe(
       'kubectl config (in WSL (Nope)) failed: There is no distribution with the supplied name.',
+    );
+  });
+});
+
+// wsl.exe's own messages: in the Windows display language, in UTF-16 unless WSL_UTF8=1, on stdout.
+// runProcess decodes them as UTF-8, as here.
+const utf16 = (text: string): string => Buffer.from(text, 'utf16le').toString('utf8');
+const DISTRO_NOT_FOUND_DE =
+  'Es ist keine Verteilung mit dem angegebenen Namen vorhanden.\r\n' +
+  'Fehlercode: Wsl/Service/WSL_E_DISTRO_NOT_FOUND\r\n';
+const NO_DISTRIBUTION_DE =
+  'Für das Windows-Subsystem für Linux sind keine Distributionen installiert.\r\n' +
+  'Sie können das Problem beheben, indem Sie eine Distribution mit den folgenden Anweisungen ' +
+  'installieren:\r\n\r\n' +
+  '"wsl.exe --list --online" zum Auflisten verfügbarer Distributionen verwenden\r\n' +
+  'und "wsl.exe --install <Distro>" zum Installieren.\r\n';
+
+describe("WSL's own failures", () => {
+  const wsl = { kubectl: 'kubectl', wsl: { distro: 'Ubuntu-24.04' } };
+
+  it('names the setting when the distribution does not exist, in any language and encoding', () => {
+    for (const stdout of [DISTRO_NOT_FOUND_DE, utf16(DISTRO_NOT_FOUND_DE)]) {
+      const error = queryFailure(wsl, 'config view', {
+        code: 4294967295,
+        stdout,
+        stderr: utf16('wsl: Eine Warnung, die nichts zur Sache tut.\r\n'),
+      });
+      expect(error.code).toBe('CONFIG_INVALID');
+      expect(error.message).toMatch(
+        /^WSL has no distribution named "Ubuntu-24\.04" \(WSL_E_DISTRO_NOT_FOUND\)\. "wsl\.exe --list --verbose"/,
+      );
+      expect(error.message).toMatch(
+        /"dev\.containers\.kubectlWSLDistro".*attach to the pod again/s,
+      );
+    }
+  });
+
+  it('says that there is no default distribution, also when none is installed at all', () => {
+    for (const stdout of [DISTRO_NOT_FOUND_DE, NO_DISTRIBUTION_DE, utf16(NO_DISTRIBUTION_DE)]) {
+      const error = queryFailure({ kubectl: 'kubectl', wsl: {} }, 'config view', {
+        code: 4294967295,
+        stdout,
+        stderr: '',
+      });
+      expect(error.message).toMatch(/^WSL has no default distribution to run kubectl in\./);
+      expect(error.message).toContain('"dev.containers.kubectlInWSL": false');
+    }
+  });
+
+  it('reports other WSL errors with their first line and code', () => {
+    const error = queryFailure(wsl, 'get pods', {
+      code: 4294967295,
+      stdout:
+        'Der Dienst kann nicht gestartet werden.\r\nFehlercode: Wsl/Service/WSL_E_VM_MODE_INVALID_STATE\r\n',
+      stderr: '',
+    });
+    expect(error.message).toBe(
+      'WSL could not run kubectl in WSL (Ubuntu-24.04): Der Dienst kann nicht gestartet werden. ' +
+        '(WSL_E_VM_MODE_INVALID_STATE).',
+    );
+  });
+
+  it("leaves kubectl's own errors alone, also in WSL", () => {
+    expect(
+      queryFailure(wsl, 'get pods', {
+        code: 1,
+        stdout: '',
+        stderr: 'error: You must be logged in\n',
+      }).message,
+    ).toBe('kubectl get pods (in WSL (Ubuntu-24.04)) failed: error: You must be logged in');
+  });
+});
+
+describe('the detail of a kubectl failure', () => {
+  it('drops klog lines and carriage returns, keeping what kubectl says', () => {
+    const stderr =
+      'E1028 09:05:27.691553     284 memcache.go:381] "Couldn\'t get current server API group list" err="..."\r\n' +
+      'E1028 09:05:27.692468     284 memcache.go:381] "Couldn\'t get current server API group list" err="..."\r\n' +
+      'The connection to the server localhost:8080 was refused - did you specify the right host or port?\r\n';
+    expect(queryFailure({ kubectl: 'kubectl' }, 'get pod', { code: 1, stderr }).message).toBe(
+      'kubectl get pod failed: The connection to the server localhost:8080 was refused - did you ' +
+        'specify the right host or port?',
+    );
+  });
+
+  it('keeps klog lines when there is nothing else', () => {
+    const stderr = 'E1028 09:05:27.691553     284 memcache.go:381] "Something" err="x"\n';
+    expect(queryFailure({ kubectl: 'kubectl' }, 'get pod', { code: 1, stderr }).message).toBe(
+      `kubectl get pod failed: ${stderr.trim()}`,
+    );
+  });
+});
+
+describe('missing contexts', () => {
+  it('names where kubectl looked for a kubeconfig', () => {
+    expect(noContextError({}).message).toBe(
+      'kubectl found no Kubernetes context in its kubeconfig (KUBECONFIG, else ~/.kube/config): ' +
+        'the file does not exist or lists no contexts. Set "dev.containers.kubeconfigPath" to your ' +
+        'kubeconfig.',
+    );
+    expect(noContextError({ kubeconfig: 'C:\\k\\config' }).message).toContain(
+      'in "C:\\k\\config": the file does not exist',
+    );
+  });
+
+  it('explains the usual causes in WSL', () => {
+    const message = noContextError({ wsl: { distro: 'ubuntu-2404' } }).message;
+    expect(message).toMatch(
+      /^kubectl in WSL \(ubuntu-2404\) found no Kubernetes context in ~\/\.kube\/config/,
+    );
+    expect(message).toContain('KUBECONFIG names in the login profile (~/.profile, not ~/.bashrc)');
+    expect(message).toContain(
+      'If your kubeconfig is on Windows, set "dev.containers.kubeconfigPath"',
+    );
+    expect(message).toContain('"wsl --import" runs as root');
+    expect(message).toContain('"dev.containers.kubectlInWSL" to false');
+    expect(noContextError({ wsl: {}, kubeconfig: '~/.kube/work' }).message).toMatch(
+      /^kubectl in WSL found no Kubernetes context in "~\/\.kube\/work": the file does not exist there/,
+    );
+  });
+
+  it('explains a missing current context for the explorer and for a window', () => {
+    expect(noCurrentContextError({ wsl: { distro: 'u' } }, 'explorer').message).toMatch(
+      /^kubectl in WSL \(u\) has no current Kubernetes context.*"vs-kubernetes\.use-wsl".*use-context <name>" in that distribution/s,
+    );
+    expect(noCurrentContextError({}, 'window').message).toBe(
+      'This window names no Kubernetes context, and kubectl has no current one. Set one with ' +
+        '"kubectl config use-context <name>", or attach to the pod again.',
     );
   });
 });

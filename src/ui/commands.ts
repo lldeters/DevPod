@@ -13,7 +13,7 @@ import { errorMessage } from '../core/errors';
 import type { KnownTargets } from '../remote/knownTargets';
 import type { RebuildRequests } from '../remote/rebuildRequests';
 import { showDiagnostics } from './diagnostics';
-import { attachToPod, resolveExplorerTarget } from './kubernetes';
+import { attachToPod, resolveExplorerTarget, wslSetting } from './kubernetes';
 import type { ExplorerTarget } from './kubernetes';
 import type { OutputLogger } from './logging';
 import { currentAuthority, localWorkspaceFolder } from './remoteState';
@@ -234,6 +234,7 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
     targets: services.targets,
     ensureRemoteSupport,
     resolveTarget: services.resolveExplorerTarget ?? resolveExplorerTarget,
+    wslSetting: () => wslSetting(),
   };
 
   const showPodMenu = async (): Promise<void> => {

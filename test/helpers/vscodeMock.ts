@@ -22,6 +22,10 @@ export const state = {
   /** Indexes for consecutive quick picks (multi-step flows); falls back to `quickPickIndex`. */
   quickPickSequence: [] as number[],
   quickPickCalls: [] as unknown[][],
+  /** The title of every quick pick shown. */
+  quickPickTitles: [] as (string | undefined)[],
+  /** How many input boxes were shown. */
+  inputBoxCount: 0,
   resolverApiEnabled: true,
   resolvers: new Map<string, unknown>(),
   appRoot: '/nonexistent',
@@ -49,6 +53,8 @@ export function reset(): void {
   state.quickPickIndex = 0;
   state.quickPickSequence = [];
   state.quickPickCalls = [];
+  state.quickPickTitles = [];
+  state.inputBoxCount = 0;
   state.resolverApiEnabled = true;
   state.resolvers.clear();
   state.appRoot = '/nonexistent';
@@ -188,11 +194,15 @@ export const window = {
     state.errorMessages.push(message);
     return state.nextChoice;
   },
-  showQuickPick: async (items: unknown[]): Promise<unknown> => {
+  showQuickPick: async (items: unknown[], options?: { title?: string }): Promise<unknown> => {
     state.quickPickCalls.push(items);
+    state.quickPickTitles.push(options?.title);
     return items[state.quickPickSequence.shift() ?? state.quickPickIndex];
   },
-  showInputBox: async (): Promise<string | undefined> => state.inputBoxValue,
+  showInputBox: async (): Promise<string | undefined> => {
+    state.inputBoxCount++;
+    return state.inputBoxValue;
+  },
   showTextDocument: async () => undefined,
   withProgress: async <T>(
     _options: unknown,

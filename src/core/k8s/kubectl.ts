@@ -7,7 +7,14 @@ import { runProcess } from '../process';
 import type { RunResult } from '../process';
 import type { ExecOptions } from '../engine/containerEngine';
 import type { ServerExecutor } from '../server/provisioner';
-import { describeWsl, kubectlProcess, wslExecutable } from './launcher';
+import * as path from 'node:path';
+import {
+  WSL_KUBECONFIG_SEPARATOR,
+  describeWsl,
+  kubeconfigFiles,
+  kubectlProcess,
+  wslExecutable,
+} from './launcher';
 import type { KubectlLauncher, WslSelection } from './launcher';
 import { assertPodRef } from './podRef';
 import type { PodRef } from './podRef';
@@ -72,11 +79,12 @@ export class KubectlExecutor implements ServerExecutor {
   }
 
   exec(options: ExecOptions & { stdin?: string; signal?: AbortSignal }): Promise<RunResult> {
-    const { command, args } = kubectlProcess(
+    const { command, args, env } = kubectlProcess(
       this.launcher(),
       kubectlExecArgs(this.ref, options.command),
     );
     return runProcess(command, args, {
+      ...(env ? { env: { ...process.env, ...env } } : {}),
       ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
@@ -302,26 +310,37 @@ function kubectlIn(wsl: WslSelection | undefined): string {
 }
 
 /** kubectl lists no context at all: its kubeconfig does not exist, or is empty. */
-export function noContextError(scope: KubectlScope): DevContainerError {
-  const file = scope.kubeconfig === undefined ? undefined : `"${scope.kubeconfig}"`;
+export function noContextError(
+  scope: KubectlScope,
+  delimiter: string = path.delimiter,
+): DevContainerError {
+  const files =
+    scope.kubeconfig === undefined
+      ? []
+      : kubeconfigFiles(scope.kubeconfig, scope.wsl ? WSL_KUBECONFIG_SEPARATOR : delimiter);
+  const named = files.map((file) => `"${file}"`).join(', ');
+  const missing =
+    files.length > 1
+      ? 'the files do not exist or list no contexts'
+      : 'the file does not exist or lists no contexts';
   if (!scope.wsl) {
     return new DevContainerError(
       'CONFIG_NOT_FOUND',
-      `kubectl found no Kubernetes context in ${file ?? 'its kubeconfig (KUBECONFIG, else ~/.kube/config)'}: ` +
-        'the file does not exist or lists no contexts. Set "dev.containers.kubeconfigPath" to your ' +
-        'kubeconfig.',
+      `kubectl found no Kubernetes context in ${named || 'its kubeconfig (KUBECONFIG, else ~/.kube/config)'}: ` +
+        `${missing}. Set "dev.containers.kubeconfigPath" to your kubeconfig.`,
     );
   }
   return new DevContainerError(
     'CONFIG_NOT_FOUND',
     `${kubectlIn(scope.wsl)} found no Kubernetes context in ` +
-      `${file ?? "~/.kube/config of the distribution's default user, or the file that KUBECONFIG names in the login profile (~/.profile, ~/.bash_profile or ~/.zprofile, not ~/.bashrc)"}: ` +
-      'the file does not exist there or lists no contexts. If your kubeconfig is on Windows, copy ' +
-      'it into the distribution or set "dev.containers.kubeconfigPath" to it (for example ' +
-      'C:\\Users\\<you>\\.kube\\config); certificate files and credential plugins it names must ' +
-      'then exist in WSL. A ' +
-      'distribution created with "wsl --import" runs as root unless it has a default user. To run ' +
-      'kubectl on Windows instead, set "dev.containers.kubectlInWSL" to false.',
+      `${named || "~/.kube/config of the distribution's default user, or the file that KUBECONFIG names in the login profile (~/.profile, ~/.bash_profile or ~/.zprofile, not ~/.bashrc)"}: ` +
+      `${missing} in WSL. If your kubeconfig is on Windows, copy it into the distribution or set ` +
+      '"dev.containers.kubeconfigPath" to it (for example C:\\Users\\<you>\\.kube\\config, or ' +
+      '\\\\wsl.localhost\\<distribution>\\home\\<you>\\.kube\\config for a file inside the ' +
+      'distribution; several files are separated by ";"); certificate files and credential ' +
+      'plugins it names must then exist in WSL. A distribution created with "wsl --import" runs as ' +
+      'root unless it has a default user. To run kubectl on Windows instead, set ' +
+      '"dev.containers.kubectlInWSL" to false.',
   );
 }
 
@@ -332,9 +351,14 @@ export function noCurrentContextError(
   platform: NodeJS.Platform = process.platform,
 ): DevContainerError {
   const file = scope.kubeconfig === undefined ? undefined : `"${scope.kubeconfig}"`;
+  const files =
+    scope.kubeconfig === undefined
+      ? []
+      : kubeconfigFiles(scope.kubeconfig, scope.wsl ? WSL_KUBECONFIG_SEPARATOR : path.delimiter);
   const set =
     `Set one with "kubectl config use-context <name>` +
-    `${scope.kubeconfig === undefined ? '' : ` --kubeconfig=${scope.kubeconfig}`}"` +
+    (files.length === 1 ? ` --kubeconfig=${scope.kubeconfig}"` : '"') +
+    (files.length > 1 ? ' (with KUBECONFIG set to those files; the first one keeps it)' : '') +
     `${scope.wsl ? ' in that distribution' : ''}`;
   if (situation === 'explorer') {
     return new DevContainerError(
@@ -385,17 +409,19 @@ export class Kubectl {
 
   private async runWith(scope: KubectlScope, label: string, args: string[]): Promise<string> {
     const launcher = this.launcher(scope.wsl);
-    const { command, args: processArgs } = kubectlProcess(launcher, [
-      ...kubectlBaseArgs({ kubeconfig: scope.kubeconfig }),
-      ...args,
-    ]);
+    const {
+      command,
+      args: processArgs,
+      env,
+    } = kubectlProcess(launcher, [...kubectlBaseArgs({ kubeconfig: scope.kubeconfig }), ...args]);
+    // WSL_UTF8 makes wsl.exe write its own messages in UTF-8 instead of UTF-16.
+    const extra = { ...(launcher.wsl ? { WSL_UTF8: '1' } : {}), ...env };
     let result: RunResult;
     try {
-      // WSL_UTF8 makes wsl.exe write its own messages in UTF-8 instead of UTF-16.
       result = await runProcess(
         command,
         processArgs,
-        launcher.wsl ? { env: { ...process.env, WSL_UTF8: '1' } } : {},
+        Object.keys(extra).length > 0 ? { env: { ...process.env, ...extra } } : {},
       );
     } catch (error) {
       throw new DevContainerError('ENGINE_UNAVAILABLE', notStartedMessage(launcher), {

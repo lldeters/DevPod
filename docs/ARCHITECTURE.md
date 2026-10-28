@@ -155,8 +155,12 @@ exec -i --container=... pod -- ...` for a pod.
    interpret the arguments, and the bridge passes a Node.js script as one. The fixed wrapper reads
    `PATH` and `KUBECONFIG` from `$SHELL -l` with that shell's stdin, stdout and stderr detached (a
    profile can neither print into the protocol nor read from it; markers separate the values from
-   any output), expands `~/` in the kubectl path and in a leading `--kubeconfig=`, converts a Windows
-   kubeconfig path with `wslpath`, and `exec`s kubectl. The pod authority records the WSL selection
+   any output), expands `~/` in the kubectl path, turns a leading `--kubeconfig=` (a list separated
+   by `;`) into `KUBECONFIG` with `~/` expanded and Windows drive paths converted by `wslpath`, and
+   `exec`s kubectl. Before that, `kubectlProcess` turns Windows paths into the distribution itself
+   (`\\wsl.localhost\<distro>\...`) into Linux paths and refuses ones into another distribution.
+   Natively, a list is passed as `KUBECONFIG` too, since `--kubeconfig` takes a single file; every
+   file of a list is validated on its own (absolute, no network share). The pod authority records the WSL selection
    like the kubeconfig, so a window keeps it when the settings change; every kubectl call of that
    window (query, provisioning, bridge, tunnels) goes through it.
 

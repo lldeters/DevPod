@@ -7,7 +7,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import * as net from 'node:net';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { checkContainerRunning } from '../../src/core/k8s/attach';
@@ -115,6 +115,19 @@ describe.skipIf(!enabled)('Kubernetes pod end to end', () => {
     );
     expect(await empty.currentContext()).toBeUndefined();
     expect(await empty.contexts()).toEqual([]);
+  });
+
+  it('merges a list of kubeconfig files, which only KUBECONFIG supports', async () => {
+    const own = path.join(homedir(), '.kube', 'config');
+    const list = new Kubectl(
+      () => ({ kubectl: 'kubectl' }),
+      () => ({ kubeconfig: [path.join(root, 'missing.yaml'), own].join(path.delimiter) }),
+    );
+    expect(await list.currentContext()).toBe(ref.context);
+    expect(await list.contexts()).toContain(ref.context);
+    expect((await list.pod({ ...ref, kubeconfig: [own, own].join(path.delimiter) })).phase).toBe(
+      'Running',
+    );
   });
 
   it('reports a pod that does not exist', async () => {

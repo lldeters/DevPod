@@ -26,8 +26,10 @@ describe('pod authority', () => {
     expect(decodePodAuthority(encodePodAuthority(ref))).toEqual(ref);
     const minimal: PodRef = { namespace: 'default', pod: 'p', container: 'c' };
     expect(decodePodAuthority(encodePodAuthority(minimal))).toEqual(minimal);
-    const withConfig: PodRef = { ...ref, kubeconfig: 'C:\\Users\\me\\.kube\\config' };
+    const withConfig: PodRef = { ...ref, kubeconfig: '/home/me/.kube/config' };
     expect(decodePodAuthority(encodePodAuthority(withConfig))).toEqual(withConfig);
+    const inWsl: PodRef = { ...ref, wsl: {}, kubeconfig: 'C:\\Users\\me\\.kube\\config' };
+    expect(decodePodAuthority(encodePodAuthority(inWsl))).toEqual(inWsl);
   });
 
   it('only contains characters that are safe in a URI authority', () => {

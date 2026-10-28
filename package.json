@@ -2,7 +2,7 @@
   "name": "devcontainers-kiro",
   "displayName": "Dev Containers for Kiro (Community)",
   "description": "Unofficial, open-source Dev Containers support for the Kiro IDE. Not affiliated with Microsoft or Amazon.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "lldeters",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -220,7 +220,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods. Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
+          "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods; several files are separated like in `KUBECONFIG` (`;` on Windows and for kubectl in WSL, `:` elsewhere). Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
         },
         "dev.containers.kubectlInWSL": {
           "type": "boolean",

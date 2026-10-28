@@ -4,7 +4,7 @@
 import * as path from 'node:path';
 import { hasUnsafeCharacters, isNetworkPath } from '../authority';
 import { DevContainerError } from '../errors';
-import { isValidWslDistro } from './launcher';
+import { WSL_KUBECONFIG_SEPARATOR, isValidWslDistro, kubeconfigFiles, wslPathOf } from './launcher';
 import type { WslSelection } from './launcher';
 
 /** Remote authority prefix for Kubernetes pods: `k8s-pod+<hex>`. */
@@ -39,7 +39,7 @@ function fail(what: string): never {
  * Checks every field. These values end up as kubectl arguments, so none may start with a dash or
  * contain anything but the characters Kubernetes itself allows.
  */
-export function assertPodRef(ref: PodRef): void {
+export function assertPodRef(ref: PodRef, delimiter: string = path.delimiter): void {
   if (ref.namespace.length > 63 || !DNS_NAME.test(ref.namespace)) fail('namespace');
   if (ref.pod.length > 253 || !DNS_NAME.test(ref.pod)) fail('pod name');
   if (ref.container.length > 63 || !DNS_NAME.test(ref.container)) fail('container name');
@@ -49,26 +49,37 @@ export function assertPodRef(ref: PodRef): void {
   if (ref.wsl?.distro !== undefined && !isValidWslDistro(ref.wsl.distro)) {
     fail('WSL distribution');
   }
-  if (
-    ref.kubeconfig !== undefined &&
-    (hasUnsafeCharacters(ref.kubeconfig) || !isKubeconfigPath(ref.kubeconfig, ref.wsl))
-  ) {
-    fail('kubeconfig path');
-  }
-  // A kubeconfig decides which server kubectl talks to and can run commands (exec credential
-  // plugins), and reading one from a share already contacts that host.
-  if (ref.kubeconfig !== undefined && isNetworkPath(ref.kubeconfig)) {
-    fail('kubeconfig path (network shares are not supported)');
+  if (ref.kubeconfig !== undefined) {
+    // Several files are each checked, split as kubectl will split them: by ";" in WSL, else like
+    // KUBECONFIG on this machine.
+    const files = kubeconfigFiles(ref.kubeconfig, ref.wsl ? WSL_KUBECONFIG_SEPARATOR : delimiter);
+    if (
+      files.length === 0 ||
+      hasUnsafeCharacters(ref.kubeconfig) ||
+      !files.every((file) => isKubeconfigPath(file, ref.wsl))
+    ) {
+      fail('kubeconfig path');
+    }
+    // A kubeconfig decides which server kubectl talks to and can run commands (exec credential
+    // plugins), and reading one from a share already contacts that host.
+    if (files.some(isNetworkPath)) {
+      fail('kubeconfig path (network shares are not supported)');
+    }
   }
 }
 
 /**
- * An absolute path. In WSL also `~/...`, and only a Linux path or a Windows path with a drive
- * letter: those are the forms the WSL wrapper of kubectl understands.
+ * An absolute path. In WSL also `~/...`, and only a Linux path, a Windows path with a drive letter
+ * or a Windows path into a distribution (`\\wsl.localhost\...`): the forms kubectl in WSL can use.
  */
 function isKubeconfigPath(file: string, wsl: WslSelection | undefined): boolean {
   if (wsl) {
-    return path.posix.isAbsolute(file) || file.startsWith('~/') || /^[A-Za-z]:[\\/]/.test(file);
+    return (
+      path.posix.isAbsolute(file) ||
+      file.startsWith('~/') ||
+      /^[A-Za-z]:[\\/]/.test(file) ||
+      wslPathOf(file) !== undefined
+    );
   }
   return path.posix.isAbsolute(file) || path.win32.isAbsolute(file);
 }

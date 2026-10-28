@@ -8,7 +8,7 @@ import { DevContainerError, errorMessage } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
 import { noContextError, noCurrentContextError } from '../core/k8s/kubectl';
 import type { Kubectl, KubectlScope, PodInfo } from '../core/k8s/kubectl';
-import { isValidWslDistro } from '../core/k8s/launcher';
+import { isValidWslDistro, kubeconfigFiles } from '../core/k8s/launcher';
 import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { encodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
@@ -90,7 +90,10 @@ export function effectiveKubeconfig(wsl?: WslSelection): string | undefined {
       userValue<Record<string, unknown>>(undefined, 'vs-kubernetes')?.['vs-kubernetes.kubeconfig'],
     );
   if (configured === undefined) return undefined;
-  return wsl ? configured : expandHome(configured);
+  // Several files are separated like KUBECONFIG: by ";" on Windows, ":" elsewhere.
+  return wsl
+    ? configured
+    : kubeconfigFiles(configured, path.delimiter).map(expandHome).join(path.delimiter);
 }
 
 /**

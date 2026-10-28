@@ -8,7 +8,7 @@ import { DevContainerError, errorMessage } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
 import { noContextError, noCurrentContextError } from '../core/k8s/kubectl';
 import type { Kubectl, KubectlScope, PodInfo } from '../core/k8s/kubectl';
-import { isValidWslDistro, kubeconfigFiles } from '../core/k8s/launcher';
+import { isValidWslDistro, kubeconfigFiles, windowsRoot } from '../core/k8s/launcher';
 import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { encodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
@@ -144,7 +144,8 @@ function isWindowsProgram(file: string): boolean {
 /**
  * How kubectl is started for `wsl` (a window's recorded mode, or the configured one). In WSL,
  * `dev.containers.kubectlPath` is a Linux path, and the Kubernetes extension's (Windows) paths do
- * not apply; without one, the login shell's PATH finds kubectl.
+ * not apply; without one, the login shell's PATH finds kubectl. Sign-in pages open in the Windows
+ * browser unless `dev.containers.kubectlWSLBrowser` is `wsl`.
  */
 export function kubectlLauncher(
   wsl: WslSelection | undefined,
@@ -164,7 +165,11 @@ export function kubectlLauncher(
       `kubectl runs in WSL, so "dev.containers.kubectlPath" must be empty or a Linux path, not "${own}".`,
     );
   }
-  return { kubectl: own ?? 'kubectl', wsl };
+  return {
+    kubectl: own ?? 'kubectl',
+    wsl,
+    ...(readSettings().kubectlWSLBrowser === 'windows' ? { windowsBrowser: windowsRoot() } : {}),
+  };
 }
 
 export interface AttachDependencies {

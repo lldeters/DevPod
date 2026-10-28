@@ -2,12 +2,13 @@
 // local sh), the error messages and the window target. test/e2e/wsl.test.ts runs the same through
 // a real wsl.exe on Windows.
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DevContainerError } from '../../src/core/errors';
 import {
+  Kubectl,
   KubectlTarget,
   kubectlExecArgs,
   noContextError,
@@ -16,8 +17,10 @@ import {
   queryFailure,
 } from '../../src/core/k8s/kubectl';
 import {
+  WSL_BROWSER_SHIM,
   WSL_KUBECTL_SCRIPT,
   kubectlProcess,
+  windowsRoot,
   wslExecutable,
   wslPathOf,
 } from '../../src/core/k8s/launcher';
@@ -51,11 +54,26 @@ describe('starting kubectl', () => {
       '-c',
       WSL_KUBECTL_SCRIPT,
       'kubectl',
+      '-',
       'kubectl',
       'get',
       'pods',
     ]);
     expect(spec.args).not.toContain('--');
+  });
+
+  it('names the Windows folder when web pages go to the Windows browser', () => {
+    const spec = kubectlProcess({ kubectl: 'kubectl', wsl: {}, windowsBrowser: 'C:\\WINDOWS' }, [
+      'get',
+    ]);
+    expect(spec.args.slice(spec.args.indexOf(WSL_KUBECTL_SCRIPT) + 1)).toEqual([
+      'kubectl',
+      'C:\\WINDOWS',
+      'kubectl',
+      'get',
+    ]);
+    // the shim is put into the script in single quotes
+    expect(WSL_BROWSER_SHIM).not.toContain("'");
   });
 
   it('uses the default distribution unless one is named', () => {
@@ -132,16 +150,30 @@ describe('starting kubectl', () => {
     expect(wslPathOf('/home/me/x')).toBeUndefined();
   });
 
+  it('says in the log where sign-in pages open', () => {
+    const kubectl = new Kubectl(
+      (wsl) =>
+        wsl ? { kubectl: 'kubectl', wsl, windowsBrowser: 'C:\\Windows' } : { kubectl: 'k' },
+      () => ({ wsl: { distro: 'Ubuntu' } }),
+    );
+    expect(kubectl.describe()).toBe(
+      'kubectl "kubectl" in WSL (Ubuntu) (sign-ins in the Windows browser), ' +
+        "kubeconfig kubectl's default",
+    );
+    expect(kubectl.describe({})).toBe('kubectl "k", kubeconfig kubectl\'s default');
+  });
+
   it('takes wsl.exe from the Windows system folder', () => {
     expect(wslExecutable({ SystemRoot: 'D:\\Win' })).toBe('D:\\Win\\System32\\wsl.exe');
     expect(wslExecutable({})).toBe('C:\\Windows\\System32\\wsl.exe');
+    expect(windowsRoot({ SystemRoot: 'D:\\Win' })).toBe('D:\\Win');
   });
 
   it('runs pod commands in WSL too, with the command as separate arguments', () => {
     const target = new KubectlTarget({ kubectl: 'kubectl', wsl: {} }, ref);
     const spec = target.spec(['node', '-e', BRIDGE_SCRIPT, '4000']);
     expect(spec.command).toBe(wslExecutable());
-    expect(spec.args.slice(spec.args.indexOf(WSL_KUBECTL_SCRIPT) + 3)).toEqual(
+    expect(spec.args.slice(spec.args.indexOf(WSL_KUBECTL_SCRIPT) + 4)).toEqual(
       kubectlExecArgs(ref, ['node', '-e', BRIDGE_SCRIPT, '4000']),
     );
   });
@@ -161,10 +193,11 @@ describe.skipIf(process.platform === 'win32')('the wrapper script inside WSL', (
       path.join(bin, 'argv-dump'),
       '#!/bin/sh\nprintf \'%s\\0\' "${KUBECONFIG-unset}"\nfor a; do printf \'%s\\0\' "$a"; done\n',
     );
-    // Stands in for WSL's wslpath.
+    // Stands in for WSL's wslpath; W:\\Win is the Windows folder of the browser tests.
     await writeFile(
       path.join(bin, 'wslpath'),
-      '#!/bin/sh\n[ "$1" = -u ] && printf \'/mnt/c/converted%s\' "$(printf %s "$2" | cut -c3- | tr \'\\\\\\\\\' /)"\n',
+      '#!/bin/sh\n[ "$1" = -u ] || exit 1\n[ "$2" = \'W:\\Win\' ] && { printf %s "$HOME/win"; exit; }\n' +
+        'printf \'/mnt/c/converted%s\' "$(printf %s "$2" | cut -c3- | tr \'\\\\\\\\\' /)"\n',
     );
     await chmod(path.join(bin, 'argv-dump'), 0o755);
     await chmod(path.join(bin, 'wslpath'), 0o755);
@@ -186,12 +219,17 @@ describe.skipIf(process.platform === 'win32')('the wrapper script inside WSL', (
     kubectl: string,
     args: string[],
     input = '',
+    windows = '-',
   ): { code: number | null; out: string[]; stdout: string; stderr: string } {
-    const result = spawnSync('/bin/sh', ['-c', WSL_KUBECTL_SCRIPT, 'kubectl', kubectl, ...args], {
-      input,
-      encoding: 'utf8',
-      env: { HOME: home, SHELL: '/bin/sh', PATH: `/usr/bin:/bin` },
-    });
+    const result = spawnSync(
+      '/bin/sh',
+      ['-c', WSL_KUBECTL_SCRIPT, 'kubectl', windows, kubectl, ...args],
+      {
+        input,
+        encoding: 'utf8',
+        env: { HOME: home, SHELL: '/bin/sh', PATH: `/usr/bin:/bin` },
+      },
+    );
     return {
       code: result.status,
       out: result.stdout.split('\0').slice(0, -1),
@@ -271,6 +309,85 @@ describe.skipIf(process.platform === 'win32')('the wrapper script inside WSL', (
     const result = run('no-such-kubectl', ['get']);
     expect(result.code).toBe(127);
     expect(result.stderr).toMatch(/no-such-kubectl/);
+  });
+
+  describe('web pages of credential plugins', () => {
+    const shim = (): string => path.join(home, '.cache', 'devcontainers-kiro', 'bin', 'xdg-open');
+
+    beforeAll(async () => {
+      // A Windows folder whose rundll32.exe notes where it ran and what it was given.
+      await mkdir(path.join(home, 'win', 'System32'), { recursive: true });
+      await writeFile(
+        path.join(home, 'win', 'System32', 'rundll32.exe'),
+        '#!/bin/sh\n{ pwd; for a; do printf \'%s\\n\' "$a"; done; } >> "$HOME/rundll32.log"\n',
+      );
+      await chmod(path.join(home, 'win', 'System32', 'rundll32.exe'), 0o755);
+      // The xdg-open of the distribution, on the login PATH.
+      await writeFile(
+        path.join(bin, 'xdg-open'),
+        '#!/bin/sh\nprintf \'wsl-xdg-open %s\\n\' "$*"\n',
+      );
+      await chmod(path.join(bin, 'xdg-open'), 0o755);
+      // A credential plugin: opens its arguments with xdg-open and BROWSER, says which it found.
+      await writeFile(
+        path.join(bin, 'sign-in'),
+        '#!/bin/sh\nfor u; do xdg-open "$u"; ${BROWSER:-xdg-open} "$u"; done\n' +
+          'printf \'found %s %s\\n\' "$(command -v xdg-open)" "${BROWSER-unset}"\n',
+      );
+      await chmod(path.join(bin, 'sign-in'), 0o755);
+    });
+
+    beforeEach(async () => {
+      await rm(path.join(home, 'rundll32.log'), { force: true });
+      await rm(path.join(home, '.cache'), { recursive: true, force: true });
+    });
+
+    const opened = async (): Promise<string> =>
+      readFile(path.join(home, 'rundll32.log'), 'utf8').catch(() => '');
+
+    it('go to the Windows default browser, started from the Windows folder', async () => {
+      const url =
+        'https://login.example/auth?client_id=k8s&redirect_uri=http%3A%2F%2Flocalhost%3A8000';
+      const result = run('sign-in', [url], '', 'W:\\Win');
+      expect(result.code).toBe(0);
+      const once = `${home}/win\nurl.dll,FileProtocolHandler\n${url}\n`;
+      expect(await opened()).toBe(once + once); // through xdg-open and through BROWSER
+      expect(result.stdout).toBe(`found ${shim()} ${shim()}\n`);
+      expect(await readFile(shim(), 'utf8')).toBe(`${WSL_BROWSER_SHIM}\n`);
+      expect((await stat(shim())).mode & 0o111).toBe(0o111);
+    });
+
+    it("leave anything else to the distribution's xdg-open", async () => {
+      const result = run('sign-in', ['/tmp/report.pdf'], '', 'W:\\Win');
+      expect(await opened()).toBe('');
+      expect(result.stdout).toMatch(
+        /^wsl-xdg-open \/tmp\/report\.pdf\nwsl-xdg-open \/tmp\/report\.pdf\n/,
+      );
+    });
+
+    it('stay with WSL when asked to, or when Windows has no rundll32.exe', async () => {
+      for (const windows of ['-', 'X:\\NoWindows']) {
+        const result = run('sign-in', ['https://login.example/'], '', windows);
+        expect(result.stdout, windows).toBe(
+          `wsl-xdg-open https://login.example/\nwsl-xdg-open https://login.example/\nfound ${bin}/xdg-open unset\n`,
+        );
+      }
+      expect(await opened()).toBe('');
+    });
+
+    it('rewrite a changed shim, and keep kubectl running when it cannot be written', async () => {
+      await mkdir(path.dirname(shim()), { recursive: true });
+      await writeFile(shim(), '#!/bin/sh\necho old\n', { mode: 0o755 });
+      run('sign-in', [], '', 'W:\\Win');
+      expect(await readFile(shim(), 'utf8')).toBe(`${WSL_BROWSER_SHIM}\n`);
+
+      await rm(path.join(home, '.cache'), { recursive: true, force: true });
+      await writeFile(path.join(home, '.cache'), 'not a directory');
+      const result = run('sign-in', ['https://login.example/'], '', 'W:\\Win');
+      expect(result.code).toBe(0);
+      expect(result.stdout).toMatch(/^wsl-xdg-open https:\/\/login\.example\//);
+      expect(await opened()).toBe('');
+    });
   });
 });
 

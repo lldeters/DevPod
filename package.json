@@ -2,7 +2,7 @@
   "name": "devcontainers-kiro",
   "displayName": "Dev Containers for Kiro (Community)",
   "description": "Unofficial, open-source Dev Containers support for the Kiro IDE. Not affiliated with Microsoft or Amazon.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "lldeters",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -233,6 +233,20 @@
           "default": "",
           "scope": "machine",
           "markdownDescription": "The WSL distribution that runs `kubectl` with `#dev.containers.kubectlInWSL#`. Leave empty for the default distribution."
+        },
+        "dev.containers.kubectlWSLBrowser": {
+          "type": "string",
+          "enum": [
+            "windows",
+            "wsl"
+          ],
+          "enumDescriptions": [
+            "The Windows default browser, with the certificates and sign-ins of Windows.",
+            "As WSL opens them (`xdg-open`), for example a browser installed in WSL."
+          ],
+          "default": "windows",
+          "scope": "machine",
+          "markdownDescription": "With kubectl in WSL (`#dev.containers.kubectlInWSL#`): where the web pages open that kubectl's credential plugins open, such as sign-ins (for example `kubectl oidc-login` or `kubelogin`)."
         },
         "dev.containers.shareKiroLogin": {
           "type": "string",

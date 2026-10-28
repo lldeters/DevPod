@@ -20,6 +20,14 @@ describe('readSettings', () => {
     expect(readSettings().shareKiroLogin).toBe('ask');
   });
 
+  it('opens sign-in pages of kubectl in WSL in the Windows browser unless set to WSL', () => {
+    expect(readSettings().kubectlWSLBrowser).toBe('windows');
+    mock.state.settings['dev.containers.kubectlWSLBrowser'] = 'wsl';
+    expect(readSettings().kubectlWSLBrowser).toBe('wsl');
+    mock.state.settings['dev.containers.kubectlWSLBrowser'] = 'firefox';
+    expect(readSettings().kubectlWSLBrowser).toBe('windows');
+  });
+
   it('keeps the meaning of the former boolean values', () => {
     mock.state.settings['dev.containers.shareKiroLogin'] = true;
     expect(readSettings().shareKiroLogin).toBe('always');

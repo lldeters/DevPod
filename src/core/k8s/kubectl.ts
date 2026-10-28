@@ -397,8 +397,12 @@ export class Kubectl {
 
   /** Which kubectl and kubeconfig `scope` means, for the log. */
   describe(scope: KubectlScope = this.current()): string {
+    const launcher = this.launcher(scope.wsl);
+    const where = scope.wsl
+      ? ` ${describeWsl(scope.wsl)}${launcher.windowsBrowser ? ' (sign-ins in the Windows browser)' : ''}`
+      : '';
     return (
-      `kubectl "${this.launcher(scope.wsl).kubectl}"${scope.wsl ? ` ${describeWsl(scope.wsl)}` : ''}, ` +
+      `kubectl "${launcher.kubectl}"${where}, ` +
       `kubeconfig ${scope.kubeconfig === undefined ? "kubectl's default" : `"${scope.kubeconfig}"`}`
     );
   }

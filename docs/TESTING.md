@@ -2,14 +2,14 @@
 
 ## Automated
 
-| Command                    | Needs                                                 | Covers                                                                                                                     |
-| -------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `npm test`                 | Node                                                  | Unit tests: discovery, JSONC, authority, CLI args/output, server scripts (executed under `sh`), provisioner, bridge relay  |
-| `npm run test:integration` | Node, git                                             | The **real** pinned Dev Container CLI with a docker stub: flag existence, `read-configuration`, Git-root workspace path    |
-| `npm run test:smoke`       | Node, git, a build                                    | Loads the **built** `dist/extension.js` with a stand-in `vscode`, runs _Reopen in Container_ with the bundled CLI          |
-| `npm run test:e2e:k8s`     | kubectl, a throw-away cluster (kind), `DCK_E2E_K8S=1` | Real pod: attach picker queries, readiness checks, server install through `kubectl exec`, reuse, port relay out of the pod |
-| `npm run test:e2e`         | Docker, `DCK_E2E=1`                                   | Real container: `up`, lifecycle command, idempotence, server install and reuse, byte-exact bridge                          |
-| `npm run test:e2e:wsl`     | Windows, WSL, `DCK_E2E_WSL=1` (`DCK_WSL_DISTRO`)      | kubectl in WSL: arguments through `wsl.exe` unchanged, byte-exact stdio, `~` and `wslpath`, login `PATH`, error messages   |
+| Command                    | Needs                                                 | Covers                                                                                                                                 |
+| -------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                 | Node                                                  | Unit tests: discovery, JSONC, authority, CLI args/output, server scripts (executed under `sh`), provisioner, bridge relay              |
+| `npm run test:integration` | Node, git                                             | The **real** pinned Dev Container CLI with a docker stub: flag existence, `read-configuration`, Git-root workspace path                |
+| `npm run test:smoke`       | Node, git, a build                                    | Loads the **built** `dist/extension.js` with a stand-in `vscode`, runs _Reopen in Container_ with the bundled CLI                      |
+| `npm run test:e2e:k8s`     | kubectl, a throw-away cluster (kind), `DCK_E2E_K8S=1` | Real pod: attach picker queries, readiness checks, server install through `kubectl exec`, reuse, port relay out of the pod             |
+| `npm run test:e2e`         | Docker, `DCK_E2E=1`                                   | Real container: `up`, lifecycle command, idempotence, server install and reuse, byte-exact bridge                                      |
+| `npm run test:e2e:wsl`     | Windows, WSL, `DCK_E2E_WSL=1` (`DCK_WSL_DISTRO`)      | kubectl in WSL: arguments through `wsl.exe` unchanged, byte-exact stdio, `~` and `wslpath`, login `PATH`, error messages, browser shim |
 
 CI runs all of them (`.github/workflows/ci.yml`).
 
@@ -112,6 +112,10 @@ With kubectl installed only inside WSL and `dev.containers.kubectlInWSL` set to 
       `~/.profile`) works.
 - [ ] With `dev.containers.kubectlWSLDistro` set to a distribution that does not exist, the
       message names it in readable text.
+- [ ] With an OIDC sign-in (`kubectl oidc-login` or `kubelogin`) whose token is not cached, the
+      sign-in page opens in the Windows default browser, the sign-in completes, and the log says
+      `(sign-ins in the Windows browser)`. With `dev.containers.kubectlWSLBrowser` set to `wsl`,
+      WSL opens it instead.
 - [ ] Turning the setting off and reloading a window that was attached in WSL still connects
       through WSL.
 

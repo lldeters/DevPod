@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 (2026-10-28)
+
+- **Sign-ins of kubectl in WSL open in the Windows browser**: web pages that credential plugins
+  (`kubectl oidc-login`, `kubelogin`) open go to the Windows default browser, with the certificates
+  and sign-ins of Windows, instead of a browser inside WSL. The new setting
+  `dev.containers.kubectlWSLBrowser` (`windows` by default, or `wsl`) chooses. A custom `xdg-open`
+  in the distribution no longer gets in the way.
+- The log of every attach says where sign-in pages open.
+- The setup in the README mentions that the extension offers **Enable Remote Support** by itself.
+
 ## 0.2.2 (2026-10-28)
 
 - **Several kubeconfig files**: `dev.containers.kubeconfigPath` (and the Kubernetes extension's

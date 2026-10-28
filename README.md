@@ -4,7 +4,7 @@ Open-source [dev container](https://containers.dev) support for the [Kiro](https
 reopen a folder inside a container, with the IDE server, terminal, extensions and language
 tooling running in it.
 
-> **Status: experimental (0.2.2), real-world tested.**
+> **Status: experimental (0.3.0), real-world tested.**
 > Verified in Kiro 1.4.26 (VS Code 1.131) on Windows with Docker Desktop (Docker 29.2.0):
 > _Reopen in Container_, terminal and file editing in the container, installing extensions, a Kiro
 > agent session, _Rebuild Container_, _Reopen Folder Locally_, reconnecting to a running container,
@@ -22,7 +22,7 @@ it is a clean-room implementation: it contains no code from Microsoft's propriet
 Containers" extension. It builds on the public specification and the open-source
 [Dev Container CLI](https://github.com/devcontainers/cli). See [NOTICE](NOTICE).
 
-## Features (0.2.2)
+## Features (0.3.0)
 
 - Detects dev container configurations (`.devcontainer/devcontainer.json`, `.devcontainer.json`,
   `.devcontainer/<name>/devcontainer.json`) and lets you pick one.
@@ -42,7 +42,7 @@ Containers" extension. It builds on the public specification and the open-source
   and choose **Attach to Kiro**, or run **Attach to Running Kubernetes Container...** from the
   command palette (it works without the Kubernetes extension, too). A new window opens whose files,
   terminal, extensions and ports live in a container of that pod. On Windows, kubectl can run
-  inside WSL. See [Kubernetes pods](#kubernetes-pods).
+  inside WSL, with sign-ins in the Windows browser. See [Kubernetes pods](#kubernetes-pods).
 - Docker and Podman.
 - No telemetry.
 
@@ -62,9 +62,10 @@ bug reports are welcome in the [issue tracker](https://github.com/lldeters/DevPo
    Extensions view, which searches [Open VSX](https://open-vsx.org). A `.vsix` from the
    [releases](https://github.com/lldeters/DevPod/releases) works too (Extensions view → `...` →
    _Install from VSIX_).
-2. Run **Kiro Dev Containers: Enable Remote Support (proposed API)**. This adds this extension's
-   ID to `enable-proposed-api` in the IDE's `argv.json` after you confirm. Quit and restart the
-   IDE completely.
+2. Run **Kiro Dev Containers: Enable Remote Support (proposed API)**, or click **Enable Remote
+   Support** when the extension offers it the first time you open a container or attach to a pod.
+   This adds this extension's ID to `enable-proposed-api` in the IDE's `argv.json` after you
+   confirm. Quit and restart the IDE completely.
 3. Run **Kiro Dev Containers: Show Diagnostics** if something does not work; it copies the facts
    needed to analyze the problem (no credentials) to the clipboard.
 4. If the IDE does not declare where its server can be downloaded, set
@@ -89,19 +90,20 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 
 ## Settings
 
-| Setting                                    | Default  | Purpose                                                                   |
-| ------------------------------------------ | -------- | ------------------------------------------------------------------------- |
-| `dev.containers.dockerPath`                | `docker` | Container engine CLI (`docker` or `podman`).                              |
-| `dev.containers.dockerComposePath`         | empty    | Compose CLI; empty lets the Dev Container CLI choose.                     |
-| `dev.containers.devcontainerCliPath`       | empty    | Your own `devcontainer` (executable, `.js`, or npm's `devcontainer.cmd`). |
-| `dev.containers.logLevel`                  | `info`   | `info`, `debug` or `trace`.                                               |
-| `dev.containers.promptToReopen`            | `true`   | Offer to reopen folders that have a configuration.                        |
-| `dev.containers.serverDownloadUrlTemplate` | empty    | Where to download the IDE server (see above).                             |
-| `dev.containers.kubectlPath`               | empty    | `kubectl` for pods; else the Kubernetes extension's, else `PATH`.         |
-| `dev.containers.kubeconfigPath`            | empty    | kubeconfig(s) for pods; else the Kubernetes extension's, else kubectl's.  |
-| `dev.containers.kubectlInWSL`              | `false`  | Windows: run kubectl inside WSL (see [kubectl in WSL](#kubectl-in-wsl)).  |
-| `dev.containers.kubectlWSLDistro`          | empty    | The WSL distribution for that; empty means the default one.               |
-| `dev.containers.shareKiroLogin`            | `ask`    | Copy this machine's Kiro sign-in into containers and pods (see below).    |
+| Setting                                    | Default   | Purpose                                                                   |
+| ------------------------------------------ | --------- | ------------------------------------------------------------------------- |
+| `dev.containers.dockerPath`                | `docker`  | Container engine CLI (`docker` or `podman`).                              |
+| `dev.containers.dockerComposePath`         | empty     | Compose CLI; empty lets the Dev Container CLI choose.                     |
+| `dev.containers.devcontainerCliPath`       | empty     | Your own `devcontainer` (executable, `.js`, or npm's `devcontainer.cmd`). |
+| `dev.containers.logLevel`                  | `info`    | `info`, `debug` or `trace`.                                               |
+| `dev.containers.promptToReopen`            | `true`    | Offer to reopen folders that have a configuration.                        |
+| `dev.containers.serverDownloadUrlTemplate` | empty     | Where to download the IDE server (see above).                             |
+| `dev.containers.kubectlPath`               | empty     | `kubectl` for pods; else the Kubernetes extension's, else `PATH`.         |
+| `dev.containers.kubeconfigPath`            | empty     | kubeconfig(s) for pods; else the Kubernetes extension's, else kubectl's.  |
+| `dev.containers.kubectlInWSL`              | `false`   | Windows: run kubectl inside WSL (see [kubectl in WSL](#kubectl-in-wsl)).  |
+| `dev.containers.kubectlWSLDistro`          | empty     | The WSL distribution for that; empty means the default one.               |
+| `dev.containers.kubectlWSLBrowser`         | `windows` | Where sign-in pages of kubectl in WSL open: `windows` or `wsl`.           |
+| `dev.containers.shareKiroLogin`            | `ask`     | Copy this machine's Kiro sign-in into containers and pods (see below).    |
 
 ## Kubernetes pods
 
@@ -157,8 +159,27 @@ by this extension.)
   not matter, dots and dashes do), for example `Ubuntu-24.04` or `Ubuntu`.
 - A window that was attached this way keeps running kubectl in that distribution, even if the
   settings change later.
-- Sign-ins that open a browser (OIDC) need a way to open one from WSL, for example `wslu`. kubectl's
-  output is not shown while it waits for the sign-in.
+- Sign-in pages that credential plugins open (OIDC, for example `kubectl oidc-login` or
+  `kubelogin`) open in the **Windows default browser**, with the certificates and sign-ins of
+  Windows. For this, kubectl finds a small `xdg-open` first (also set as `BROWSER`), which the
+  extension writes to `~/.cache/devcontainers-kiro/bin` in the distribution and which hands web
+  addresses to Windows (`rundll32.exe url.dll,FileProtocolHandler`, started from the Windows
+  folder). The plugin's redirect back to `http://localhost:<port>` reaches WSL through its
+  localhost forwarding, which is on by default. Set `dev.containers.kubectlWSLBrowser` to `wsl` to
+  let WSL open them instead. kubectl's output is not shown while it waits for the sign-in.
+- The Kubernetes extension's own kubectl does not get this. Credential plugins usually cache the
+  token in the distribution, so after a sign-in through _Attach to Kiro_ its explorer uses it too.
+  If the explorer itself has to sign in and opens a browser in WSL, sign in through _Attach to
+  Kiro_ once, or make web addresses in the distribution open in Windows, for example with this
+  `/usr/local/bin/xdg-open` (`sudo chmod +x` it):
+
+  ```sh
+  #!/bin/sh
+  case "${1-}" in
+    http://*|https://*) cd /mnt/c/Windows && exec ./System32/rundll32.exe url.dll,FileProtocolHandler "$1" ;;
+  esac
+  exec /usr/bin/xdg-open "$@"
+  ```
 
 Without this setting, `dev.containers.kubectlPath` must be a program Windows can start directly,
 such as `kubectl.exe`: a `.cmd` or `.bat` wrapper cannot be used, because kubectl is started

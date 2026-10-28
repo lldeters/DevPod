@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.4 (2026-10-28)
 
 - The settings for programs and paths (`dockerPath`, `dockerComposePath`, `devcontainerCliPath`,
   `serverDownloadUrlTemplate`, `kubectlPath`, `kubeconfigPath`, `kubectlInWSL`, `kubectlWSLDistro`,

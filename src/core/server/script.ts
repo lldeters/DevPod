@@ -325,7 +325,10 @@ export const BRIDGE_SCRIPT = [
   'if (!Number.isInteger(port) || port < 1 || port > 65535) process.exit(2);',
   'if (!/^[A-Za-z0-9._:-]{1,253}$/.test(host)) process.exit(2);',
   'const socket = net.connect(port, host);',
-  'process.stdin.pipe(socket);',
+  // Input is passed on only once connected. When a host has several addresses (localhost: ::1 and
+  // 127.0.0.1) and the first attempt fails, Node starts over on the next one and forgets an end()
+  // given meanwhile, so the end of the input would never reach the service.
+  "socket.on('connect', () => process.stdin.pipe(socket));",
   'socket.pipe(process.stdout);',
   // Exit only once stdout has taken everything: exiting right away drops what is still buffered,
   // which cuts off the end of a response when a slow reader is attached.

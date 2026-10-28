@@ -242,6 +242,62 @@ describe('openTunnel', () => {
     expect(received).toBe(payload.length);
   });
 
+  it('lets go of a connection after the relay ended, also when the client sent more', async () => {
+    // The service answers and closes; the client sends once more before it closes too, as a pool
+    // reusing a connection the service has already dropped does.
+    const remote = await new Promise<number>((resolve) => {
+      const server = net.createServer((socket) => socket.end('bye'));
+      cleanups.push(() => new Promise<void>((done) => server.close(() => done())));
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
+    });
+    const tunnel = await open(remote);
+    await new Promise<void>((resolve, reject) => {
+      const socket = net.connect({
+        port: tunnel.local.port,
+        host: '127.0.0.1',
+        allowHalfOpen: true,
+      });
+      socket.on('error', reject);
+      socket.on('end', () => socket.end('more'));
+      socket.on('close', () => resolve());
+      socket.resume();
+    });
+    for (let waited = 0; tunnel.connections() > 0 && waited < 5000; waited += 10) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(tunnel.connections()).toBe(0);
+  });
+
+  it('answers a client that ends its side right after the request', async () => {
+    const remote = await new Promise<number>((resolve) => {
+      // Replies once the request is complete, like a service that reads until the end of input.
+      const server = net.createServer({ allowHalfOpen: true }, (socket) => {
+        const chunks: Buffer[] = [];
+        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+        socket.on('end', () => socket.end(Buffer.concat(chunks)));
+      });
+      cleanups.push(() => new Promise<void>((done) => server.close(() => done())));
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
+    });
+    const tunnel = await open(remote);
+    const answer = await new Promise<string>((resolve, reject) => {
+      const socket = net.connect({
+        port: tunnel.local.port,
+        host: '127.0.0.1',
+        allowHalfOpen: true,
+      });
+      const chunks: Buffer[] = [];
+      socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+      socket.on('end', () => {
+        socket.end();
+        resolve(Buffer.concat(chunks).toString('utf8'));
+      });
+      socket.on('error', reject);
+      socket.on('connect', () => socket.end('hello'));
+    });
+    expect(answer).toBe('hello');
+  });
+
   it('close() stops the listener and ends open connections', async () => {
     const tunnel: OpenTunnel = await open(await startEcho());
     const socket = net.connect(tunnel.local.port, '127.0.0.1');

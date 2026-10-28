@@ -232,9 +232,13 @@ which `node` the bridge uses (the server's bundled one if present, else the cont
   only (`userValue` in `src/ui/settings.ts`), so a workspace cannot set them. A remote window
   takes `machine` settings from the remote side, and the IDE applies scopes only to keys it knows
   (a section written as an object passes), so in a container or pod window a value that comes
-  from the remote side is ignored. The same holds for the Kubernetes extension's settings used as
-  a fallback (`kubectl-path`, `kubeconfig`, `use-wsl`). `dev.containers.*` settings in a
-  `devcontainer.json` are reported and not written into the container.
+  from the remote side is ignored, and this machine's value comes first (the remote side could
+  also erase it, with `"dev.containers": null`). The same holds for the Kubernetes extension's
+  settings used as a fallback (`kubectl-path`, `kubeconfig`, `use-wsl`); its `kubectl-path` has
+  scope `machine`, though, so a pod window in which that extension runs too does not see the local
+  value at all (README: set `dev.containers.kubectlPath`). The settings with scope `application`
+  in a `devcontainer.json`, and the section written as an object, are reported and not written
+  into the container.
 - kubectl in WSL runs with `wsl.exe --exec`, never through the distribution's default shell; batch
   files (`.cmd`, `.bat`) are not supported as kubectl, since starting them needs `cmd.exe` and its
   quoting rules.

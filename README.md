@@ -135,7 +135,9 @@ the pod is recreated.
 Images without a shell (for example distroless images) cannot be used. `kubectl` must be installed
 and able to reach the cluster; the path and kubeconfig set for the Kubernetes extension in your user
 settings are honored (workspace values are not), or set `dev.containers.kubectlPath` /
-`dev.containers.kubeconfigPath`.
+`dev.containers.kubeconfigPath`. If kubectl is not on `PATH`, prefer `dev.containers.kubectlPath`:
+the Kubernetes extension's kubectl path is a machine setting, which a pod window does not see once
+that extension runs in it too, so reconnecting could not find kubectl.
 
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.

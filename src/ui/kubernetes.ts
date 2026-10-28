@@ -12,6 +12,7 @@ import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { encodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
 import type { KnownTargets } from '../remote/knownTargets';
+import type { PodKubectlPaths } from '../remote/podKubectlPaths';
 import { readSettings, userValue } from './settings';
 
 /** What a right-click in the Kubernetes explorer pointed at. */
@@ -50,20 +51,28 @@ export function expandHome(file: string): string {
   return file === '~' || /^~[\\/]/.test(file) ? path.join(homedir(), file.slice(1)) : file;
 }
 
+/** The kubectl path the Kubernetes extension is configured with in the user settings, per OS first. */
+export function kubernetesKubectlPath(): string | undefined {
+  const os =
+    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
+  return (
+    nonEmpty(userValue('vscode-kubernetes', `kubectl-path-${os}`)) ??
+    nonEmpty(userValue('vscode-kubernetes', 'kubectl-path'))
+  );
+}
+
 /**
- * The kubectl binary: this extension's setting, else the one the Kubernetes extension is
- * configured with in the user settings (per OS, then general), else `kubectl` from PATH.
+ * The kubectl binary: this extension's setting, else the Kubernetes extension's, else `remembered`,
+ * else `kubectl` from PATH. `remembered` is the Kubernetes extension's path that a pod window was
+ * attached with: that setting has scope `machine`, so the IDE hides it in a pod window in which the
+ * Kubernetes extension runs too.
  */
-export function effectiveKubectlPath(): string {
+export function effectiveKubectlPath(remembered?: string): string {
   const own = readSettings().kubectlPath;
   if (own) {
     return expandHome(own);
   }
-  const os =
-    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
-  const configured =
-    nonEmpty(userValue('vscode-kubernetes', `kubectl-path-${os}`)) ??
-    nonEmpty(userValue('vscode-kubernetes', 'kubectl-path'));
+  const configured = kubernetesKubectlPath() ?? remembered;
   return configured ? expandHome(configured) : 'kubectl';
 }
 
@@ -121,15 +130,19 @@ function isWindowsProgram(file: string): boolean {
 }
 
 /**
- * How kubectl is started for `wsl` (a window's recorded mode, or the configured one). In WSL,
+ * How kubectl is started for `wsl` (a window's recorded mode, or the configured one), with the
+ * path `remembered` for a pod window (see effectiveKubectlPath). In WSL,
  * `dev.containers.kubectlPath` is a Linux path, and the Kubernetes extension's (Windows) paths do
  * not apply; without one, the login shell's PATH finds kubectl.
  */
 export function kubectlLauncher(
   wsl: WslSelection | undefined,
-  platform: NodeJS.Platform = process.platform,
+  {
+    remembered,
+    platform = process.platform,
+  }: { remembered?: string | undefined; platform?: NodeJS.Platform } = {},
 ): KubectlLauncher {
-  if (!wsl) return { kubectl: effectiveKubectlPath() };
+  if (!wsl) return { kubectl: effectiveKubectlPath(remembered) };
   if (platform !== 'win32') {
     throw new DevContainerError(
       'ENGINE_UNAVAILABLE',
@@ -151,6 +164,8 @@ export interface AttachDependencies {
   kubectl: Kubectl;
   /** Records the window this opens, so the pod resolver opens it without asking. */
   targets: Pick<KnownTargets, 'add'>;
+  /** Keeps the Kubernetes extension's kubectl path for the window this opens. */
+  kubectlPaths: Pick<PodKubectlPaths, 'set'>;
   /** False (after guiding the user) when the proposed API that remote windows need is not enabled. */
   ensureRemoteSupport: () => Promise<boolean>;
   resolveTarget: (target: unknown) => Promise<ExplorerTarget | undefined>;
@@ -309,6 +324,9 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
   });
   deps.logger.log('info', `Attaching to ${namespace}/${podName} (${container}) in a new window`);
   await deps.targets.add(authority);
+  // The new window may not see the Kubernetes extension's kubectl path (see effectiveKubectlPath).
+  // In WSL it does not apply.
+  await deps.kubectlPaths.set(authority, scope.wsl ? undefined : kubernetesKubectlPath());
   await vscode.commands.executeCommand('vscode.newWindow', {
     remoteAuthority: authority,
     reuseWindow: false,

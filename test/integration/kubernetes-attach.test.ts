@@ -8,6 +8,7 @@ import { Kubectl } from '../../src/core/k8s/kubectl';
 import { decodePodAuthority } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
+import { PodKubectlPaths } from '../../src/remote/podKubectlPaths';
 import {
   attachToPod,
   effectiveKubeconfig,
@@ -26,6 +27,7 @@ const { state } = mock;
 let root: string;
 let stub: KubectlStub;
 let targets: KnownTargets;
+let kubectlPaths: PodKubectlPaths;
 
 beforeAll(async () => {
   root = await realpath(await mkdtemp(path.join(tmpdir(), 'dck-attach-')));
@@ -41,6 +43,7 @@ afterAll(async () => {
 beforeEach(async () => {
   mock.reset();
   targets = new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento);
+  kubectlPaths = new PodKubectlPaths(new mock.MockMemento() as unknown as vscode.Memento);
   await stub.reset();
   await stub.set('current-context', 'kind-test');
   await stub.set('pod.json', podJson());
@@ -56,6 +59,7 @@ function dependencies(
       () => effectiveKubectlScope(),
     ),
     targets,
+    kubectlPaths,
     ensureRemoteSupport: async () => options.supported ?? true,
     resolveTarget: async () => options.target,
   };
@@ -121,6 +125,23 @@ describe('attach from the Kubernetes explorer', () => {
     expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').container).toBe('app');
   });
 
+  it("keeps the Kubernetes extension's kubectl path for the new window, on this machine", async () => {
+    state.settings['vscode-kubernetes.kubectl-path'] = '/opt/k8s/kubectl';
+    const deps = dependencies({ target: clickedPod });
+    await attachToPod(deps, {});
+    const authority = openedWindow()?.remoteAuthority ?? '';
+    expect(kubectlPaths.get(authority)).toBe('/opt/k8s/kubectl');
+    const payload = Buffer.from(authority.slice(authority.indexOf('+') + 1), 'hex').toString();
+    expect(payload).not.toContain('/opt/k8s/kubectl'); // never in the authority
+
+    // An attach without that setting forgets it, so the window uses what the attach used.
+    delete state.settings['vscode-kubernetes.kubectl-path'];
+    state.executed = [];
+    await attachToPod(deps, {});
+    expect(openedWindow()?.remoteAuthority).toBe(authority);
+    expect(kubectlPaths.get(authority)).toBeUndefined();
+  });
+
   it('records the context at click time, so a later switch cannot redirect the window', async () => {
     await stub.set('current-context', 'prod-cluster');
     await attachToPod(dependencies({ target: clickedPod }), {});
@@ -182,6 +203,17 @@ describe('attach from the Kubernetes explorer', () => {
     expect(launched.every((mode) => mode === wsl)).toBe(true);
     const queries = await stub.calls();
     expect(queries.every((args) => args[0] === '--kubeconfig=~/.kube/config')).toBe(true);
+  });
+
+  it("keeps no Kubernetes extension's kubectl path for a window that runs kubectl in WSL", async () => {
+    state.settings['vscode-kubernetes.kubectl-path'] = 'C:\\tools\\kubectl.exe';
+    const deps = dependencies({ target: clickedPod });
+    deps.kubectl = new Kubectl(
+      () => ({ kubectl: stub.path }),
+      () => ({ wsl: {} }),
+    );
+    await attachToPod(deps, {});
+    expect(kubectlPaths.get(openedWindow()?.remoteAuthority ?? '')).toBeUndefined();
   });
 
   it('uses the configured kubeconfig for both the query and the connection', async () => {
@@ -281,6 +313,24 @@ describe('which kubectl and kubeconfig are used', () => {
     expect(effectiveKubeconfig()).toBe('/ext/config');
   });
 
+  it('falls back to the path remembered for a pod window, which may not see that setting', () => {
+    expect(effectiveKubectlPath('/remembered/kubectl')).toBe('/remembered/kubectl');
+    expect(effectiveKubectlPath('~/bin/kubectl')).toBe(path.join(homedir(), 'bin', 'kubectl'));
+    expect(kubectlLauncher(undefined, { remembered: '/remembered/kubectl' })).toEqual({
+      kubectl: '/remembered/kubectl',
+    });
+    state.settings['vscode-kubernetes.kubectl-path'] = '/now/kubectl';
+    expect(effectiveKubectlPath('/remembered/kubectl')).toBe('/now/kubectl'); // seen: it is current
+    state.settings['dev.containers.kubectlPath'] = '/own/kubectl';
+    expect(effectiveKubectlPath('/remembered/kubectl')).toBe('/own/kubectl');
+    // In WSL, only this extension's setting applies, as a Linux path.
+    delete state.settings['dev.containers.kubectlPath'];
+    expect(kubectlLauncher({}, { remembered: '/remembered/kubectl', platform: 'win32' })).toEqual({
+      kubectl: 'kubectl',
+      wsl: {},
+    });
+  });
+
   it('uses kubectl from PATH and its own kubeconfig lookup by default', () => {
     expect(effectiveKubectlPath()).toBe('kubectl');
     expect(effectiveKubeconfig()).toBeUndefined();
@@ -360,23 +410,30 @@ describe('which kubectl and kubeconfig are used', () => {
   it('starts kubectl in WSL from its Linux path, or from the login PATH', () => {
     const wsl = { distro: 'Ubuntu' };
     state.settings['vscode-kubernetes.kubectl-path'] = 'C:\\tools\\kubectl.exe';
-    expect(kubectlLauncher(wsl, 'win32')).toEqual({ kubectl: 'kubectl', wsl }); // not the Windows one
+    expect(kubectlLauncher(wsl, { platform: 'win32' })).toEqual({ kubectl: 'kubectl', wsl }); // not the Windows one
     state.settings['dev.containers.kubectlPath'] = '/usr/local/bin/kubectl';
-    expect(kubectlLauncher(wsl, 'win32')).toEqual({ kubectl: '/usr/local/bin/kubectl', wsl });
+    expect(kubectlLauncher(wsl, { platform: 'win32' })).toEqual({
+      kubectl: '/usr/local/bin/kubectl',
+      wsl,
+    });
     state.settings['dev.containers.kubectlPath'] = '~/bin/kubectl';
-    expect(kubectlLauncher(wsl, 'win32')).toEqual({ kubectl: '~/bin/kubectl', wsl });
+    expect(kubectlLauncher(wsl, { platform: 'win32' })).toEqual({ kubectl: '~/bin/kubectl', wsl });
   });
 
   it('reports a Windows kubectl path in WSL mode instead of running it', () => {
     for (const kubectl of ['C:\\tools\\kubectl.exe', 'kubectl.exe', 'D:/k/kubectl', 'k\\kubectl']) {
       state.settings['dev.containers.kubectlPath'] = kubectl;
-      expect(() => kubectlLauncher({}, 'win32'), kubectl).toThrow(/must be empty or a Linux path/);
+      expect(() => kubectlLauncher({}, { platform: 'win32' }), kubectl).toThrow(
+        /must be empty or a Linux path/,
+      );
     }
   });
 
   it('refuses a window that runs kubectl in WSL outside Windows', () => {
-    expect(() => kubectlLauncher({}, 'linux')).toThrow(/WSL, which exists only on Windows/);
-    expect(kubectlLauncher(undefined, 'linux')).toEqual({ kubectl: 'kubectl' });
+    expect(() => kubectlLauncher({}, { platform: 'linux' })).toThrow(
+      /WSL, which exists only on Windows/,
+    );
+    expect(kubectlLauncher(undefined, { platform: 'linux' })).toEqual({ kubectl: 'kubectl' });
   });
 
   it('leaves ~ in the kubeconfig to WSL', () => {

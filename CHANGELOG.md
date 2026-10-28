@@ -11,6 +11,9 @@
   **If you use profiles:** these settings are now kept in the settings of the Default profile and
   apply to all profiles. A value you set in another profile is no longer used; set it again (the
   Settings editor now stores it in the Default profile).
+- A pod window uses the kubectl path of the Kubernetes extension that it was attached with when it
+  does not see that setting, which happens once that extension runs in the window too (the setting
+  has scope `machine`). The path is kept on this machine, not in the window's address.
 - Forwarded ports no longer cut off the end of a response when the client reads more slowly than
   the container sends, and answer clients that end their side right after the request (also when
   `localhost` in the container resolves to `::1` first and the service listens on IPv4 only).

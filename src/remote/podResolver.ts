@@ -22,8 +22,11 @@ export interface PodResolverDependencies {
   logger: Logger;
   /** Read-only queries (is the pod there and running?). */
   kubectl: Kubectl;
-  /** How kubectl is started for `exec`, directly or in the window's WSL distribution; read for every connection. */
-  kubectlLauncher: (wsl: WslSelection | undefined) => KubectlLauncher;
+  /**
+   * How kubectl is started for the window of `authority`, directly or in its WSL distribution; read
+   * for every connection.
+   */
+  kubectlLauncher: (wsl: WslSelection | undefined, authority: string) => KubectlLauncher;
   /** Authorities opened by this extension; any other one is confirmed before it is used. */
   targets: Pick<KnownTargets, 'has' | 'add'>;
   serverBuild: () => Promise<ServerBuildInfo>;
@@ -102,7 +105,8 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
     );
 
     const build = await this.deps.serverBuild();
-    const pod = await kubectl.pod(ref);
+    const launcher = () => this.deps.kubectlLauncher(ref.wsl, authority);
+    const pod = await kubectl.pod(ref, launcher());
     checkContainerRunning(pod, ref.container);
 
     return vscode.window.withProgress(
@@ -116,9 +120,9 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
         token.onCancellationRequested(() => abort.abort());
 
         progress.report({ message: 'Setting up the IDE server in the pod…' });
-        const target = new KubectlTarget(this.deps.kubectlLauncher(ref.wsl), ref);
+        const target = new KubectlTarget(launcher(), ref);
         const server = await provisionServer(
-          new KubectlExecutor(() => this.deps.kubectlLauncher(ref.wsl), ref),
+          new KubectlExecutor(launcher, ref),
           {
             containerId: target.label,
             build,

@@ -236,8 +236,11 @@ export class Kubectl {
     return this.runWith(this.current(), args);
   }
 
-  private async runWith(scope: KubectlScope, args: string[]): Promise<string> {
-    const launcher = this.launcher(scope.wsl);
+  private async runWith(
+    scope: KubectlScope,
+    args: string[],
+    launcher = this.launcher(scope.wsl),
+  ): Promise<string> {
     const { command, args: processArgs } = kubectlProcess(launcher, [
       ...kubectlBaseArgs({ kubeconfig: scope.kubeconfig }),
       ...args,
@@ -284,26 +287,34 @@ export class Kubectl {
   /**
    * Describes one pod. Unlike the listing methods, which use the configured kubeconfig and WSL
    * mode, this uses exactly those of `selection`: it must query the cluster the connection will
-   * use, even if the settings have changed since the connection was made.
+   * use, even if the settings have changed since the connection was made. A connection passes the
+   * `launcher` it uses itself.
    */
-  async pod(selection: {
-    context?: string;
-    namespace: string;
-    pod: string;
-    kubeconfig?: string;
-    wsl?: WslSelection;
-  }): Promise<PodInfo> {
+  async pod(
+    selection: {
+      context?: string;
+      namespace: string;
+      pod: string;
+      kubeconfig?: string;
+      wsl?: WslSelection;
+    },
+    launcher?: KubectlLauncher,
+  ): Promise<PodInfo> {
     // Validated like an attach target, since the values become arguments.
     assertPodRef({ ...selection, container: 'placeholder' });
     return parsePodInfo(
-      await this.runWith(selection, [
-        ...kubectlBaseArgs({ context: selection.context, namespace: selection.namespace }),
-        'get',
-        'pod',
-        selection.pod,
-        '-o',
-        'json',
-      ]),
+      await this.runWith(
+        selection,
+        [
+          ...kubectlBaseArgs({ context: selection.context, namespace: selection.namespace }),
+          'get',
+          'pod',
+          selection.pod,
+          '-o',
+          'json',
+        ],
+        launcher,
+      ),
     );
   }
 }

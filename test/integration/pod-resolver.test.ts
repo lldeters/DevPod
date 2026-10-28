@@ -24,8 +24,10 @@ import { encodePodAuthority } from '../../src/core/k8s/podRef';
 import type { PodRef } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
+import { PodKubectlPaths } from '../../src/remote/podKubectlPaths';
 import { PodResolver } from '../../src/remote/podResolver';
 import { askToShareKiroLogin } from '../../src/ui/kiroLogin';
+import { kubectlLauncher } from '../../src/ui/kubernetes';
 import { callLikeTheIde } from '../helpers/ide';
 import * as mock from '../helpers/vscodeMock';
 import { createKubectlStub, podJson } from '../helpers/kubectlStub';
@@ -446,6 +448,30 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         message: expect.stringMatching(/Install kubectl or set "dev\.containers\.kubectlPath"/),
       });
       expect(state.errorMessages).toEqual([]);
+    });
+
+    it('runs kubectl from the path kept for its window when no setting shows one', async () => {
+      // As in a pod window in which the Kubernetes extension runs too, which hides its kubectl path.
+      const paths = new PodKubectlPaths(new mock.MockMemento() as unknown as vscode.Memento);
+      const authority = encodePodAuthority(ref);
+      await paths.set(authority, stub.path);
+      await paths.set(encodePodAuthority({ ...ref, pod: 'other' }), path.join(root, 'no-such'));
+      const resolver = new PodResolver({
+        logger: new MemoryLogger(),
+        // what the listing queries use, which the connection must not
+        kubectl: new Kubectl(
+          () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
+          () => ({}),
+        ),
+        kubectlLauncher: (wsl, target) => kubectlLauncher(wsl, { remembered: paths.get(target) }),
+        targets: allKnown,
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const resolved = (await resolver.resolve(authority)) as unknown as Resolved;
+      expect(resolved.connectionToken).toMatch(/^[0-9a-f]{48}$/);
     });
   },
 );

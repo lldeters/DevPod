@@ -40,6 +40,30 @@ describe('TunnelHub', () => {
     });
   });
 
+  it('keeps to the limit when the IDE asks for many ports at once', async () => {
+    const hub = connectedHub(new MemoryLogger(), 2);
+    const results = await Promise.allSettled(
+      [1, 2, 3, 4, 5].map((n) => hub.factory(request(1000 + n))),
+    );
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2);
+  });
+
+  it('counts the tunnels the IDE asks for while configured ports are being opened', async () => {
+    const hub = connectedHub(new MemoryLogger(), 3);
+    const results = await Promise.allSettled([
+      hub.forwardConfigured([
+        { host: 'localhost', port: 39111 },
+        { host: 'localhost', port: 39112 },
+        { host: 'localhost', port: 39113 },
+      ]),
+      hub.factory(request(1001)),
+      hub.factory(request(1002)),
+    ]);
+    const configured = results[0].status === 'fulfilled' ? results[0].value.length : 0;
+    const asked = results.slice(1).filter((result) => result.status === 'fulfilled').length;
+    expect(configured + asked).toBe(3);
+  });
+
   it('opens configured ports only up to the limit, counting those the IDE asked for', async () => {
     const logger = new MemoryLogger();
     const hub = connectedHub(logger, 2);

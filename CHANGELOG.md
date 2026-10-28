@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (2026-10-28)
 
 - Attaching to a pod no longer fails with "current-context is not set" when the kubeconfig has no
   current context: the command palette offers the contexts (and takes the only one without

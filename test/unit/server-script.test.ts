@@ -2,7 +2,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DevContainerError } from '../../src/core/errors';
 import { detectPlatformScript, parsePlatform } from '../../src/core/server/platform';
 import { runProcess } from '../../src/core/process';
@@ -122,6 +122,7 @@ describe('parseInstallResult', () => {
 const hasTools = ['sh', 'curl', 'tar'].every(
   (tool) => spawnSync('sh', ['-c', `command -v ${tool}`]).status === 0,
 );
+const hasFlock = spawnSync('sh', ['-c', 'command -v flock']).status === 0;
 
 describe.skipIf(process.platform === 'win32' || !hasTools)('install script execution', () => {
   let work: string;
@@ -224,19 +225,6 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
   const starts = async (info: { serverDir: string }): Promise<number> =>
     (await readFile(path.join(info.serverDir, 'starts.txt'), 'utf8')).trim().split('\n').length;
 
-  it('starts one server when two windows set it up at the same time', async () => {
-    const [first, second] = await Promise.all([
-      run(buildInstallScript(options())),
-      run(buildInstallScript(options())),
-    ]);
-    const a = parseInstallResult(first.stdout);
-    const b = parseInstallResult(second.stdout);
-    expect(b).toEqual(a);
-    expect(await starts(a)).toBe(1);
-    const token = await readFile(path.join(home, '.test-server', `server-${commit}.token`), 'utf8');
-    expect(a.token).toBe(token);
-  });
-
   it('starts a new server when the recorded PID now belongs to another process', async () => {
     const first = parseInstallResult((await run(buildInstallScript(options()))).stdout);
     const pidFile = path.join(home, '.test-server', `server-${commit}.pid`);
@@ -251,16 +239,6 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
     } finally {
       stranger.kill('SIGKILL');
     }
-  });
-
-  it('takes over a setup lock whose owner is gone', async () => {
-    const lock = path.join(home, '.test-server', 'setup.lock');
-    await mkdir(lock, { recursive: true });
-    const gone = spawnSync('sh', ['-c', 'echo $$']).stdout.toString().trim();
-    await writeFile(path.join(lock, 'owner'), `${gone} 1\n`);
-    const result = await run(buildInstallScript(options()));
-    expect(parseInstallResult(result.stdout).port).toBe(45678);
-    await expect(readFile(path.join(lock, 'owner'), 'utf8')).rejects.toThrow(); // released
   });
 
   it('passes no --install-extension when none are requested', async () => {
@@ -448,18 +426,118 @@ cp "$WGET_SOURCE" "$out"
     expect(() => parseInstallResult(result.stdout)).toThrowError(/install curl/);
   });
 
-  it('leaves a setup lock alone that another run took over meanwhile', async () => {
-    // A launcher that takes the lock over while this run still holds it, as a second run would.
-    const launcher = path.join(work, 'src', 'fake-server-linux-x64', 'bin', 'fake-server');
-    await writeFile(
-      launcher,
-      '#!/bin/sh\necho "1 1" > "$(dirname "$0")/../../../setup.lock/owner"\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
+  describe('setup lock', () => {
+    const root = (): string => path.join(home, '.test-server');
+    const exists = async (file: string): Promise<boolean> =>
+      stat(file).then(
+        () => true,
+        () => false,
+      );
+    /** Runs the install script with just `tools` (and `stubs`) on PATH. */
+    const install = async (tools: readonly string[], stubs: Record<string, string> = {}) =>
+      runProcess('/bin/sh', ['-s'], {
+        stdin: buildInstallScript(options()),
+        env: { PATH: await toolbox(tools, stubs), HOME: home },
+      });
+    const WITH_FLOCK = [...TOOLS, 'curl', 'flock'];
+    const WITHOUT_FLOCK = [...TOOLS, 'curl'];
+
+    it.each([
+      ...(hasFlock ? [['with flock', WITH_FLOCK, true] as const] : []),
+      ['with a lock directory where flock is missing', WITHOUT_FLOCK, false] as const,
+    ])(
+      'starts one server when three windows set it up at the same time (%s)',
+      async (_, tools, flock) => {
+        const setUp = async () => parseInstallResult((await install(tools)).stdout);
+        const [a, b, c] = await Promise.all([setUp(), setUp(), setUp()]);
+        expect(b).toEqual(a);
+        expect(c).toEqual(a);
+        expect(await starts(a)).toBe(1);
+        const token = await readFile(path.join(root(), `server-${commit}.token`), 'utf8');
+        expect(a.token).toBe(token);
+        // flock leaves its file behind, unlocked; a lock directory is removed again
+        expect(await exists(path.join(root(), 'setup.flock'))).toBe(flock);
+        expect(await exists(path.join(root(), 'setup.lock'))).toBe(false);
+      },
     );
-    execFileSync('tar', ['-czf', archive, '-C', path.join(work, 'src'), 'fake-server-linux-x64']);
-    const result = await run(buildInstallScript(options()));
-    expect(parseInstallResult(result.stdout).port).toBe(45678);
-    const owner = path.join(home, '.test-server', 'setup.lock', 'owner');
-    expect(await readFile(owner, 'utf8')).toBe('1 1\n');
+
+    it('uses a lock directory where flock does not work on the file system', async () => {
+      const result = await install(WITHOUT_FLOCK, { flock: '#!/bin/sh\nexit 1\n' });
+      expect(parseInstallResult(result.stdout).port).toBe(45678);
+      expect(await exists(path.join(root(), 'setup.flock'))).toBe(false);
+      expect(await exists(path.join(root(), 'setup.lock'))).toBe(false);
+      const probes = execFileSync('sh', ['-c', `ls -A "${root()}" | grep -c '^flock\\.' || true`], {
+        encoding: 'utf8',
+      });
+      expect(probes.trim()).toBe('0'); // the file flock was tried on is gone
+    });
+
+    it.skipIf(!hasFlock)(
+      'is not held up by a lock directory left behind, where flock works',
+      async () => {
+        // A lock directory without owner, as a run killed right after creating it leaves behind;
+        // the lock directory alone would wait a minute before taking it over.
+        await mkdir(path.join(root(), 'setup.lock'), { recursive: true });
+        const started = Date.now();
+        const result = await install(WITH_FLOCK);
+        expect(parseInstallResult(result.stdout).port).toBe(45678);
+        expect(Date.now() - started).toBeLessThan(10_000);
+      },
+    );
+
+    it.skipIf(!hasFlock)(
+      'is not held up by a download that a killed run left running',
+      async () => {
+        // A curl that hangs; it records its PID so that it can be stopped afterwards.
+        const stuck = path.join(work, 'stuck.pid');
+        const curl = '#!/bin/sh\necho $$ > "$STUCK_PID"\nexec sleep 60\n';
+        const first = spawn('/bin/sh', ['-s'], {
+          env: { PATH: await toolbox([...TOOLS, 'flock'], { curl }), HOME: home, STUCK_PID: stuck },
+          stdio: ['pipe', 'ignore', 'ignore'],
+        });
+        first.stdin.on('error', () => undefined);
+        first.stdin.end(buildInstallScript(options()));
+        try {
+          await vi.waitFor(() => readFile(stuck, 'utf8'), { timeout: 10_000, interval: 50 });
+          first.kill('SIGKILL'); // while it holds the lock
+          const started = Date.now();
+          const result = await install(WITH_FLOCK);
+          expect(parseInstallResult(result.stdout).port).toBe(45678);
+          expect(Date.now() - started).toBeLessThan(10_000);
+        } finally {
+          first.kill('SIGKILL');
+          const pid = Number((await readFile(stuck, 'utf8').catch(() => '')).trim());
+          try {
+            if (pid > 0) process.kill(pid, 'SIGKILL');
+          } catch {
+            // already gone
+          }
+        }
+      },
+    );
+
+    it('takes over a lock directory whose owner is gone', async () => {
+      const lock = path.join(root(), 'setup.lock');
+      await mkdir(lock, { recursive: true });
+      const gone = spawnSync('sh', ['-c', 'echo $$']).stdout.toString().trim();
+      await writeFile(path.join(lock, 'owner'), `${gone} 1\n`);
+      const result = await install(WITHOUT_FLOCK);
+      expect(parseInstallResult(result.stdout).port).toBe(45678);
+      await expect(readFile(path.join(lock, 'owner'), 'utf8')).rejects.toThrow(); // released
+    });
+
+    it('leaves a lock directory alone that another run took over meanwhile', async () => {
+      // A launcher that takes the lock over while this run still holds it, as a second run would.
+      const launcher = path.join(work, 'src', 'fake-server-linux-x64', 'bin', 'fake-server');
+      await writeFile(
+        launcher,
+        '#!/bin/sh\necho "1 1" > "$(dirname "$0")/../../../setup.lock/owner"\necho "Extension host agent listening on 45678"\nexec sleep 120\n',
+      );
+      execFileSync('tar', ['-czf', archive, '-C', path.join(work, 'src'), 'fake-server-linux-x64']);
+      const result = await install(WITHOUT_FLOCK);
+      expect(parseInstallResult(result.stdout).port).toBe(45678);
+      expect(await readFile(path.join(root(), 'setup.lock', 'owner'), 'utf8')).toBe('1 1\n');
+    });
   });
 
   it('installs in a home directory everyone may write to, such as an emptyDir volume', async () => {

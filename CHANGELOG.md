@@ -25,7 +25,9 @@
   - The server's folder in the home directory must belong to the container user; one that someone
     else created (possible where others may write to the home directory) is refused.
   - The connection token is checked before the server starts.
-  - Two connections at once no longer remove each other's setup lock.
+  - Two connections at once no longer remove each other's setup lock. Where `flock` is available and
+    works on the file system, it serializes the setup instead of a lock directory, so a setup that
+    was interrupted can no longer let two later ones run at the same time.
   - The Kiro sign-in and the machine settings are written through a new file with an unpredictable
     name, and the settings are private to the user like the rest of the server's folder.
   - The log and error messages show the download address without user name, password and query,

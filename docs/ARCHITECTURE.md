@@ -40,9 +40,11 @@ src/ui/       Commands, status bar item, reopen prompt, setup of argv.json, logg
    download/unpack once per commit and start the server on `127.0.0.1:<random port>` with a
    token file (mode 600) and `--server-data-dir` next to it. A running server is reused; it is
    recognized by its PID **and** start time (`/proc/<pid>/stat`), so a PID that another process got
-   after a restart is not taken for it. Runs for the same folder are serialized with a lock
-   directory (`setup.lock`, owner recorded, taken over when the owner is gone), since two windows
-   may connect at once. The download must be `https` (or `file`), also after redirects: `curl`
+   after a restart is not taken for it. Runs for the same folder are serialized, since two windows
+   may connect at once: with `flock` on `setup.flock` where it works on that file system (the kernel
+   releases it when a run ends, however it ends; the download, unpacking and the server are started
+   without its descriptor, so they cannot keep it), else with a lock directory (`setup.lock`, owner
+   recorded, taken over when the owner is gone). The download must be `https` (or `file`), also after redirects: `curl`
    refuses others (`--proto-redir`); with `wget`, its response headers (`-S`) are checked and a
    `Location` that is neither `https://` nor a path fails the download, and a `wget` that shows no
    headers on stderr (Wget2) is refused.

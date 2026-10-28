@@ -459,6 +459,15 @@ describe('which kubectl and kubeconfig are used', () => {
     expect(effectiveKubeconfig({})).toBe('C:\\Users\\me\\config'); // converted inside WSL
   });
 
+  it('expands ~ in every file of a kubeconfig list, and leaves the list to WSL there', () => {
+    const list = ['~/.kube/iat.yaml', '/abs/prd.yaml'].join(path.delimiter);
+    state.settings['dev.containers.kubeconfigPath'] = list;
+    expect(effectiveKubeconfig()).toBe(
+      [path.join(homedir(), '.kube', 'iat.yaml'), '/abs/prd.yaml'].join(path.delimiter),
+    );
+    expect(effectiveKubeconfig({})).toBe(list);
+  });
+
   it('reads ~ as the home directory, since kubectl is started without a shell', () => {
     state.settings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': '~/.kube/other' };
     state.settings['vscode-kubernetes.kubectl-path'] = '~/bin/kubectl';

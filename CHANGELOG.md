@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Several kubeconfig files**: `dev.containers.kubeconfigPath` (and the Kubernetes extension's
+  `vs-kubernetes.kubeconfig`) may list several files like `KUBECONFIG` (`;` on Windows and for
+  kubectl in WSL, `:` elsewhere). They used to be passed as one `--kubeconfig`, which takes a single
+  file, so kubectl found no context at all. Each file of a list is checked on its own.
+- **kubectl in WSL** reads kubeconfig paths into its own distribution given as Windows paths
+  (`\\wsl.localhost\<distro>\...` or `//wsl.localhost/<distro>/...`, also `wsl$`) as the Linux
+  paths they are; a path into another distribution is refused with a message.
+
 ## 0.2.1 (2026-10-28)
 
 - Attaching to a pod no longer fails with "current-context is not set" when the kubeconfig has no

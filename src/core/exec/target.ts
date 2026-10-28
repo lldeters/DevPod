@@ -7,6 +7,8 @@ import { execArgs } from '../engine/containerEngine';
 export interface ProcessSpec {
   readonly command: string;
   readonly args: readonly string[];
+  /** Variables to set on top of this process's environment. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /**

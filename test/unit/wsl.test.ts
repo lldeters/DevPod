@@ -15,8 +15,13 @@ import {
   notStartedMessage,
   queryFailure,
 } from '../../src/core/k8s/kubectl';
-import { WSL_KUBECTL_SCRIPT, kubectlProcess, wslExecutable } from '../../src/core/k8s/launcher';
-import { decodePodAuthority, encodePodAuthority } from '../../src/core/k8s/podRef';
+import {
+  WSL_KUBECTL_SCRIPT,
+  kubectlProcess,
+  wslExecutable,
+  wslPathOf,
+} from '../../src/core/k8s/launcher';
+import { assertPodRef, decodePodAuthority, encodePodAuthority } from '../../src/core/k8s/podRef';
 import type { PodRef } from '../../src/core/k8s/podRef';
 import { BRIDGE_SCRIPT } from '../../src/core/server/script';
 
@@ -64,6 +69,67 @@ describe('starting kubectl', () => {
         DevContainerError,
       );
     }
+  });
+
+  it('passes a list of kubeconfig files through KUBECONFIG, and one file with --kubeconfig', () => {
+    const kubectl = { kubectl: 'kubectl' };
+    expect(kubectlProcess(kubectl, ['--kubeconfig=C:\\a;C:\\b', 'get'], ';')).toEqual({
+      command: 'kubectl',
+      args: ['get'],
+      env: { KUBECONFIG: 'C:\\a;C:\\b' },
+    });
+    expect(kubectlProcess(kubectl, ['--kubeconfig=/a:/b', 'get'], ':')).toEqual({
+      command: 'kubectl',
+      args: ['get'],
+      env: { KUBECONFIG: '/a:/b' },
+    });
+    expect(kubectlProcess(kubectl, ['--kubeconfig=C:\\a;', 'get'], ';')).toEqual({
+      command: 'kubectl',
+      args: ['--kubeconfig=C:\\a', 'get'],
+    });
+    expect(kubectlProcess(kubectl, ['get', '--kubeconfig=/a:/b'], ':')).toEqual({
+      command: 'kubectl',
+      args: ['get', '--kubeconfig=/a:/b'], // only a leading kubeconfig is the scope's
+    });
+  });
+
+  it('turns Windows paths into its own distribution into Linux paths for kubectl in WSL', () => {
+    const value =
+      '//wsl.localhost/ubuntu-2404/home/l/.kube/config_iat.yaml;' +
+      '\\\\wsl$\\Ubuntu-2404\\home\\l\\.kube\\config_prd.yaml;~/x;C:\\k';
+    const spec = kubectlProcess({ kubectl: 'kubectl', wsl: { distro: 'ubuntu-2404' } }, [
+      `--kubeconfig=${value}`,
+      'get',
+    ]);
+    expect(spec.args.slice(-2)).toEqual([
+      '--kubeconfig=/home/l/.kube/config_iat.yaml;/home/l/.kube/config_prd.yaml;~/x;C:\\k',
+      'get',
+    ]);
+    // without a named distribution, the path is taken to be in the default one
+    expect(
+      kubectlProcess({ kubectl: 'kubectl', wsl: {} }, [
+        '--kubeconfig=//wsl.localhost/Any/k',
+      ]).args.at(-1),
+    ).toBe('--kubeconfig=/k');
+  });
+
+  it('refuses a kubeconfig in another distribution than the one kubectl runs in', () => {
+    expect(() =>
+      kubectlProcess({ kubectl: 'kubectl', wsl: { distro: 'Ubuntu-24.04' } }, [
+        '--kubeconfig=//wsl.localhost/ubuntu-2404/home/l/.kube/config',
+      ]),
+    ).toThrow(/is in the WSL distribution "ubuntu-2404", but kubectl runs in "Ubuntu-24\.04"/);
+  });
+
+  it('reads Windows paths into a distribution', () => {
+    expect(wslPathOf('\\\\wsl.localhost\\Ubuntu\\home\\me\\x')).toEqual({
+      distro: 'Ubuntu',
+      path: '/home/me/x',
+    });
+    expect(wslPathOf('//WSL$/Ubuntu')).toEqual({ distro: 'Ubuntu', path: '/' });
+    expect(wslPathOf('\\\\server\\share\\x')).toBeUndefined();
+    expect(wslPathOf('//wsl.localhost/')).toBeUndefined();
+    expect(wslPathOf('/home/me/x')).toBeUndefined();
   });
 
   it('takes wsl.exe from the Windows system folder', () => {
@@ -154,7 +220,8 @@ describe.skipIf(process.platform === 'win32')('the wrapper script inside WSL', (
     ];
     const result = run('argv-dump', args);
     expect(result.code).toBe(0);
-    expect(result.out).toEqual(['/from/profile', ...args]);
+    // the kubeconfig becomes KUBECONFIG, every other argument arrives as it was
+    expect(result.out).toEqual(['/abs/config', ...args.slice(1)]);
   });
 
   it("finds kubectl on the login profile's PATH, without its output or reading kubectl's input", () => {
@@ -165,18 +232,22 @@ describe.skipIf(process.platform === 'win32')('the wrapper script inside WSL', (
 
   it('expands ~/ in the kubectl path and in the kubeconfig path to the Linux home directory', () => {
     expect(run('~/bin/argv-dump', ['--kubeconfig=~/.kube/config', 'get']).out).toEqual([
-      '/from/profile',
-      `--kubeconfig=${home}/.kube/config`,
+      `${home}/.kube/config`,
       'get',
     ]);
   });
 
   it('converts a Windows kubeconfig path with wslpath', () => {
     expect(run('argv-dump', ['--kubeconfig=C:\\Users\\me\\config', 'get']).out).toEqual([
-      '/from/profile',
-      '--kubeconfig=/mnt/c/converted/Users/me/config',
+      '/mnt/c/converted/Users/me/config',
       'get',
     ]);
+  });
+
+  it('passes a list of kubeconfig files as KUBECONFIG, which --kubeconfig cannot take', () => {
+    expect(
+      run('argv-dump', ['--kubeconfig=~/.kube/iat.yaml;/abs/prd.yaml;;C:\\k\\dev.yaml', 'get']).out,
+    ).toEqual([`${home}/.kube/iat.yaml:/abs/prd.yaml:/mnt/c/converted/k/dev.yaml`, 'get']);
   });
 
   it('leaves later arguments alone, even when they look like a kubeconfig flag', () => {
@@ -419,8 +490,11 @@ describe('missing contexts', () => {
         'the file does not exist or lists no contexts. Set "dev.containers.kubeconfigPath" to your ' +
         'kubeconfig.',
     );
-    expect(noContextError({ kubeconfig: 'C:\\k\\config' }).message).toContain(
+    expect(noContextError({ kubeconfig: 'C:\\k\\config' }, ';').message).toContain(
       'in "C:\\k\\config": the file does not exist',
+    );
+    expect(noContextError({ kubeconfig: 'C:\\a;C:\\b' }, ';').message).toContain(
+      'in "C:\\a", "C:\\b": the files do not exist or list no contexts.',
     );
   });
 
@@ -438,8 +512,20 @@ describe('missing contexts', () => {
     expect(message).toContain('credential plugins it names must then exist in WSL');
     expect(message).toContain('"wsl --import" runs as root');
     expect(message).toContain('"dev.containers.kubectlInWSL" to false');
+    expect(message).toContain(
+      '\\\\wsl.localhost\\<distribution>\\home\\<you>\\.kube\\config for a file inside the distribution; several files are separated by ";"',
+    );
     expect(noContextError({ wsl: {}, kubeconfig: '~/.kube/work' }).message).toMatch(
-      /^kubectl in WSL found no Kubernetes context in "~\/\.kube\/work": the file does not exist there/,
+      /^kubectl in WSL found no Kubernetes context in "~\/\.kube\/work": the file does not exist or lists no contexts in WSL\./,
+    );
+    expect(
+      noContextError({
+        wsl: { distro: 'ubuntu-2404' },
+        kubeconfig:
+          '//wsl.localhost/ubuntu-2404/home/l/.kube/a.yaml;//wsl.localhost/ubuntu-2404/home/l/.kube/b.yaml',
+      }).message,
+    ).toContain(
+      'in "//wsl.localhost/ubuntu-2404/home/l/.kube/a.yaml", "//wsl.localhost/ubuntu-2404/home/l/.kube/b.yaml": the files do not exist or list no contexts in WSL.',
     );
   });
 
@@ -485,6 +571,44 @@ describe('the window target in WSL', () => {
       /kubeconfig path/,
     );
     for (const kubeconfig of ['relative/config', '\\\\server\\share\\config', '//server/config']) {
+      expect(() => encodePodAuthority({ ...ref, wsl: {}, kubeconfig }), kubeconfig).toThrow(
+        /kubeconfig path/,
+      );
+    }
+  });
+
+  it('checks every file of a kubeconfig list', () => {
+    for (const kubeconfig of [
+      'C:\\a;C:\\b',
+      '\\\\wsl.localhost\\Ubuntu\\home\\me\\config',
+      '//wsl.localhost/ubuntu-2404/a.yaml;//wsl.localhost/ubuntu-2404/b.yaml',
+    ]) {
+      expect(() => encodePodAuthority({ ...ref, wsl: {}, kubeconfig }), kubeconfig).not.toThrow();
+    }
+    // Natively the list is split like KUBECONFIG on the host: ";" on Windows, ":" elsewhere.
+    const windows = (kubeconfig: string) => () => assertPodRef({ ...ref, kubeconfig }, ';');
+    const posix = (kubeconfig: string) => () => assertPodRef({ ...ref, kubeconfig }, ':');
+    expect(windows('C:\\a;D:\\b')).not.toThrow();
+    expect(posix('/a:/b')).not.toThrow();
+    // A share as a later entry: refused, as a share or (in WSL, with backslashes) as a path form.
+    expect(windows('C:\\a;\\\\evil\\share\\c')).toThrow(/network shares/);
+    expect(windows('C:\\a;//evil/share/c')).toThrow(/network shares/);
+    expect(posix('/a://evil/share/c')).toThrow(/network shares/);
+    expect(() => encodePodAuthority({ ...ref, wsl: {}, kubeconfig: '/a;//evil/share/c' })).toThrow(
+      /network shares/,
+    );
+    expect(() =>
+      encodePodAuthority({ ...ref, wsl: {}, kubeconfig: '/a;\\\\evil\\share\\c' }),
+    ).toThrow(/kubeconfig path/);
+    for (const check of [
+      windows('C:\\a;relative'),
+      windows(';'),
+      posix('/a:relative'),
+      posix(':'),
+    ]) {
+      expect(check).toThrow(/kubeconfig path/);
+    }
+    for (const kubeconfig of ['C:\\a;relative', ';']) {
       expect(() => encodePodAuthority({ ...ref, wsl: {}, kubeconfig }), kubeconfig).toThrow(
         /kubeconfig path/,
       );

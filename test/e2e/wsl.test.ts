@@ -104,8 +104,8 @@ describe.skipIf(!enabled)('kubectl in WSL end to end', () => {
     ];
     const result = await launch({ kubectl: 'argv-dump', wsl }, args);
     expect(result.code, result.stderr).toBe(0);
-    // KUBECONFIG and PATH come from the login profile, whose output does not appear
-    expect(nulSeparated(result.stdout)).toEqual(['/from/profile', ...args]);
+    // the kubeconfig arrives as KUBECONFIG; the login profile's output does not appear
+    expect(nulSeparated(result.stdout)).toEqual(['/abs/config', ...args.slice(1)]);
   });
 
   it('passes stdin and stdout through byte for byte, and ends when stdin ends', async () => {
@@ -121,18 +121,28 @@ describe.skipIf(!enabled)('kubectl in WSL end to end', () => {
       '--kubeconfig=~/.kube/config',
       'get',
     ]);
-    expect(nulSeparated(tilde.stdout)).toEqual([
-      '/from/profile',
-      `--kubeconfig=${home}/.kube/config`,
-      'get',
-    ]);
+    expect(nulSeparated(tilde.stdout)).toEqual([`${home}/.kube/config`, 'get']);
     const windows = await launch({ kubectl: 'argv-dump', wsl }, [
       '--kubeconfig=C:\\Windows\\System32\\drivers\\etc\\hosts',
       'get',
     ]);
-    expect(nulSeparated(windows.stdout)[1]).toMatch(
-      /^--kubeconfig=\/.+\/c\/Windows\/System32\/drivers\/etc\/hosts$/i,
+    expect(nulSeparated(windows.stdout)[0]).toMatch(
+      /^\/.+\/c\/Windows\/System32\/drivers\/etc\/hosts$/i,
     );
+  });
+
+  it('passes a list of kubeconfig files, also Windows paths into the distribution, as KUBECONFIG', async () => {
+    const name = distro ?? 'default';
+    const inside = `\\\\wsl.localhost\\${name}${home.replace(/\//g, '\\')}\\.kube\\iat.yaml`;
+    const result = await launch({ kubectl: 'argv-dump', wsl }, [
+      `--kubeconfig=${inside};//wsl$/${name.toLowerCase()}${home}/.kube/prd.yaml;~/.kube/dev.yaml`,
+      'get',
+    ]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(nulSeparated(result.stdout)).toEqual([
+      `${home}/.kube/iat.yaml:${home}/.kube/prd.yaml:${home}/.kube/dev.yaml`,
+      'get',
+    ]);
   });
 
   it('starts in the Linux home directory', async () => {

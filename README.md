@@ -98,7 +98,7 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | `dev.containers.promptToReopen`            | `true`   | Offer to reopen folders that have a configuration.                        |
 | `dev.containers.serverDownloadUrlTemplate` | empty    | Where to download the IDE server (see above).                             |
 | `dev.containers.kubectlPath`               | empty    | `kubectl` for pods; else the Kubernetes extension's, else `PATH`.         |
-| `dev.containers.kubeconfigPath`            | empty    | kubeconfig for pods; else the Kubernetes extension's, else kubectl's own. |
+| `dev.containers.kubeconfigPath`            | empty    | kubeconfig(s) for pods; else the Kubernetes extension's, else kubectl's.  |
 | `dev.containers.kubectlInWSL`              | `false`  | Windows: run kubectl inside WSL (see [kubectl in WSL](#kubectl-in-wsl)).  |
 | `dev.containers.kubectlWSLDistro`          | empty    | The WSL distribution for that; empty means the default one.               |
 | `dev.containers.shareKiroLogin`            | `ask`    | Copy this machine's Kiro sign-in into containers and pods (see below).    |
@@ -149,8 +149,10 @@ by this extension.)
   or the file `KUBECONFIG` names in the login profile. If your kubeconfig is on Windows, set
   `dev.containers.kubeconfigPath` to it. A distribution created with `wsl --import` runs as `root`
   unless it has a default user.
-- `dev.containers.kubeconfigPath` may be a Linux path, `~/...` (the Linux home directory) or a
-  Windows path such as `C:\Users\me\.kube\config`, which is converted with `wslpath`.
+- `dev.containers.kubeconfigPath` may be a Linux path, `~/...` (the Linux home directory), a
+  Windows path such as `C:\Users\me\.kube\config` (converted with `wslpath`), or a Windows path
+  into the distribution itself, such as `\\wsl.localhost\Ubuntu-24.04\home\me\.kube\config`.
+  Several files are separated by `;`, as in `KUBECONFIG` on Windows.
 - `dev.containers.kubectlWSLDistro` must be a name that `wsl.exe --list --verbose` shows (case does
   not matter, dots and dashes do), for example `Ubuntu-24.04` or `Ubuntu`.
 - A window that was attached this way keeps running kubectl in that distribution, even if the

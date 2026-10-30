@@ -352,7 +352,8 @@ describe.skipIf(process.platform === 'win32' || !hasTools)('install script execu
     stubs: Record<string, string> = {},
   ): Promise<string> => {
     const dir = await mkdtemp(path.join(work, 'toolbox-'));
-    for (const tool of tools) {
+    // A stand-in replaces the tool of that name; writing it over a link would replace the real one.
+    for (const tool of tools.filter((name) => !Object.hasOwn(stubs, name))) {
       const found = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' });
       if (found.status === 0) await symlink(found.stdout.trim(), path.join(dir, tool));
     }
@@ -558,6 +559,51 @@ cp "$WGET_SOURCE" "$out"
         const result = await install(tools);
         expect(parseInstallResult(result.stdout).port).toBe(45678);
         expect(await readFile(path.join(root(), 'setup.lock', 'owner'), 'utf8')).toBe('1 1\n');
+      },
+    );
+
+    // The real program behind a name on PATH, for stand-ins that call it.
+    const which = (tool: string): string =>
+      spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim();
+
+    it('starts one server when three windows set it up at the same time where mkdir is not atomic', async () => {
+      // Like uutils' mkdir 0.0.24, which also reports success when another run creates the
+      // directory at the same moment; here always, as the worst case.
+      const nonAtomicMkdir = `#!/bin/sh\nfor last in "$@"; do :; done\n"${which('mkdir')}" "$@" 2>/dev/null || [ -d "$last" ]\n`;
+      const setUp = async () =>
+        parseInstallResult((await install(WITHOUT_FLOCK, { mkdir: nonAtomicMkdir })).stdout);
+      const [a, b, c] = await Promise.all([setUp(), setUp(), setUp()]);
+      expect(b).toEqual(a);
+      expect(c).toEqual(a);
+      expect(await starts(a)).toBe(1);
+      expect(await exists(path.join(root(), 'setup.lock'))).toBe(false);
+    });
+
+    it.each(MODES)(
+      'removes a stale lock only while it still names the holder that was found gone (%s)',
+      async (_, tools) => {
+        const lock = path.join(root(), 'setup.lock');
+        await mkdir(lock, { recursive: true });
+        const gone = spawnSync('sh', ['-c', 'echo $$']).stdout.toString().trim();
+        await writeFile(path.join(lock, 'owner'), `${gone} 1\n`);
+        // The holder that is found gone ended normally right after its owner was read, and the next
+        // run (this test process) took a new lock: a cat that makes it so on that first read.
+        const fields = (await readFile('/proc/self/stat', 'utf8')).replace(/^.*\) /, '').split(' ');
+        const next = `${process.pid} ${fields[19]}`;
+        const cat = [
+          '#!/bin/sh',
+          'case "$1" in */setup.lock/owner)',
+          `  if [ ! -e "$1.read" ]; then "${which('cat')}" "$1"; : > "$1.read"; echo '${next}' > "$1"; exit 0; fi ;;`,
+          'esac',
+          `exec "${which('cat')}" "$@"`,
+          '',
+        ].join('\n');
+        const running = install(tools, { cat });
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        // The run waits for the new holder instead of removing its lock.
+        expect(await readFile(path.join(lock, 'owner'), 'utf8')).toBe(`${next}\n`);
+        await rm(lock, { recursive: true }); // the new holder is done
+        expect(parseInstallResult((await running).stdout).port).toBe(45678);
       },
     );
   });

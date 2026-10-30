@@ -277,7 +277,7 @@
           "type": "boolean",
           "default": true,
           "scope": "application",
-          "markdownDescription": "Set up the GitLab MCP server (`mcp-gitlab`) in the pods you attach to and register it as `gitlab` in `~/.kiro/settings/mcp.json` there. Only takes effect when there is a bundle: `#dev.containers.mcpGitlab.bundlePath#`, or one that this build of the extension ships. The token is taken from the variable `GITLAB_PERSONAL_ACCESS_TOKEN` of the pod and never written to a file. When off, nothing is copied or written."
+          "markdownDescription": "Set up the GitLab MCP server (`mcp-gitlab`) in the pods you attach to and register it as `gitlab` in `~/.kiro/settings/mcp.json` there. Only takes effect when there is a bundle: `#dev.containers.mcpGitlab.bundlePath#`, or one that this build of the extension ships. The server starts only when the variable `GITLAB_PERSONAL_ACCESS_TOKEN` is set in the pod; the token is taken from there and never written to a file. When off, nothing is copied or written."
         },
         "dev.containers.mcpGitlab.bundlePath": {
           "type": "string",
@@ -303,6 +303,15 @@
           "default": "",
           "scope": "application",
           "markdownDescription": "`GITLAB_TOOLSETS` for the GitLab MCP server, a comma-separated list. Leave empty for the server's default."
+        },
+        "dev.containers.mcpServers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          },
+          "default": {},
+          "scope": "application",
+          "markdownDescription": "Further MCP servers that are registered in `~/.kiro/settings/mcp.json` of the pods you attach to, in the same form as `mcpServers` there (`command`, `args`, `env`, `url`, `headers`, `disabled`, `autoApprove`, ...). Secrets are never written: a variable or header whose name looks like one (`TOKEN`, `PASSWORD`, `Authorization`, ...) must refer to a variable of the pod, such as `\"CONFLUENCE_TOKEN\": \"${CONFLUENCE_TOKEN}\"`, which Kiro expands when it starts the server. Entries of your own in the pod with the same name are not replaced, and servers removed here are removed from the pod on the next attach."
         },
         "dev.containers.mcpGitlab.env": {
           "type": "object",

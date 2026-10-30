@@ -108,7 +108,7 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | `dev.containers.kubectlWSLDistro`          | empty     | The WSL distribution for that; empty means the default one.               |
 | `dev.containers.kubectlWSLBrowser`         | `windows` | Where sign-in pages of kubectl in WSL open: `windows` or `wsl`.           |
 | `dev.containers.shareKiroLogin`            | `ask`     | Copy this machine's Kiro sign-in into containers and pods (see below).    |
-| `dev.containers.mcpGitlab.*`               |           | The GitLab MCP server in pods (see [below](#gitlab-mcp-server-in-pods)).  |
+| `dev.containers.mcpGitlab.*`, `mcpServers` |           | MCP servers in pods (see [below](#mcp-servers-in-pods)).                  |
 
 Except for `logLevel` and `promptToReopen`, these settings can only be set in the user settings.
 They apply to this machine, also in container and pod windows, and are never taken from a
@@ -145,95 +145,71 @@ attached with, which this extension keeps on your machine (attach again after ch
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.
 
-### GitLab MCP server in pods
+### MCP servers in pods
 
 Kiro's agent reads MCP servers only from `.kiro/settings/mcp.json` (workspace) or
-`~/.kiro/settings/mcp.json`; an extension cannot register one for it. So, when there is a bundle of
-`mcp-gitlab` (a single `mcp-gitlab.mjs` built with `npm run bundle`,
-which needs no `node_modules`), the extension sets it up on every attach to a pod:
+`~/.kiro/settings/mcp.json`; an extension cannot register one for it. So the extension writes the
+servers you configure on this machine into `~/.kiro/settings/mcp.json` of every pod you attach to,
+before the IDE connects:
 
-- The bundle is copied to `~/<server data folder>/mcp/mcp-gitlab.mjs` (for Kiro
-  `~/.kiro-server/mcp/mcp-gitlab.mjs`) in the pod, only when it is missing or its SHA-256 differs.
-- `~/.kiro/settings/mcp.json` in the pod gets the entry `mcpServers.gitlab`, with the Node of the
-  IDE server in the pod as `command` (the pod needs no Node of its own) and the bundle as argument.
-  Other servers, other keys and comments are kept; keys you add to the entry (`disabled`,
-  `autoApprove`) too. The file is written only when the entry changes. A `gitlab` entry that the
-  extension did not write (its argument is not the bundle) is never replaced; the log says so.
-- The token is never written: the entry sets `GITLAB_PERSONAL_ACCESS_TOKEN` to
-  `${GITLAB_PERSONAL_ACCESS_TOKEN}`, which Kiro takes from the environment of the pod. Set that
-  variable in the pod (for example from a Kubernetes secret); without it, the server starts but
-  GitLab answers 401, and a notification names the variable once per window.
+- **The GitLab MCP server** `mcp-gitlab`, when there is a bundle of it (a single `mcp-gitlab.mjs`
+  built with `npm run bundle`, which needs no `node_modules`): `dev.containers.mcpGitlab.bundlePath`
+  (an absolute path on this machine), else `mcp/mcp-gitlab.mjs` inside the extension, which a build
+  of this extension can ship. The bundle is copied to `~/<server data folder>/mcp/mcp-gitlab.mjs`
+  (for Kiro `~/.kiro-server/mcp/mcp-gitlab.mjs`) only when it is missing or its SHA-256 differs,
+  and registered as `gitlab` with the Node of the IDE server in the pod, so the pod needs no Node of
+  its own. **The server starts only when `GITLAB_PERSONAL_ACCESS_TOKEN` is set in the pod.**
+- **Further servers** from `dev.containers.mcpServers`, in the same form as `mcpServers` in Kiro's
+  `mcp.json`, for example:
 
-Where the bundle comes from: `dev.containers.mcpGitlab.bundlePath` (an absolute path on this
-machine), else `mcp/mcp-gitlab.mjs` inside the extension, which a build of this extension can ship
-(`.vscodeignore` packages that file). Without either, nothing happens.
+  ```jsonc
+  "dev.containers.mcpServers": {
+    "confluence": {
+      "command": "npx",
+      "args": ["--yes", "--registry", "https://npm.example.com", "@ai-tools/mcp-confluence@latest"],
+      "env": {
+        "CONFLUENCE_TOKEN": "${CONFLUENCE_TOKEN}",
+        "CONFLUENCE_HOST": "https://confluence.example.com",
+        "MCP_CONFLUENCE_PII_FILTER": "on",
+        "MCP_CONFLUENCE_WRITE_TOOLS": "confluence_create_page,confluence_add_comment"
+      },
+      "disabled": false,
+      "autoApprove": ["confluence_search", "confluence_get_page"]
+    }
+  }
+  ```
+
+  The command runs in the pod: `npx` needs Node.js with npm in the pod's image (the IDE server's
+  Node comes without npm) and access to the registry.
+
+Secrets are never written to the pod. The GitLab entry sets `GITLAB_PERSONAL_ACCESS_TOKEN` to
+`${GITLAB_PERSONAL_ACCESS_TOKEN}`, and a variable or header in `dev.containers.mcpServers` whose name
+looks like a secret (`TOKEN`, `PASSWORD`, `KEY`, `Authorization`, ...) must be such a reference too
+(`Bearer ${API_TOKEN}` is fine); an entry with a secret in plain text is not written, and the log
+says why. Kiro expands the references from the environment of the pod when it starts the server, so
+set the variables in the pod, for example from a Kubernetes secret. Variables that the entries refer
+to but the pod does not have are named in a notification, once per window.
+
+In `mcp.json`, other servers, other keys and comments are kept, and so are keys you add to an entry
+in the pod (Kiro writes `disabled` there when you turn a server off) unless the setting names them.
+The file is written only when an entry changes. An entry of the same name that the extension did not
+write is never replaced; the log says so. Servers removed from `dev.containers.mcpServers` are
+removed from the pod on the next attach (the extension keeps the names it wrote in `managed.json`
+next to the bundle).
 
 | Setting                               | Default | Purpose                                                         |
 | ------------------------------------- | ------- | --------------------------------------------------------------- |
-| `dev.containers.mcpGitlab.enabled`    | `true`  | `false`: nothing is copied or written.                          |
+| `dev.containers.mcpGitlab.enabled`    | `true`  | `false`: the GitLab MCP server is not copied or registered.     |
 | `dev.containers.mcpGitlab.bundlePath` | empty   | The bundle on this machine; empty: the one the extension ships. |
 | `dev.containers.mcpGitlab.apiUrl`     | empty   | `GITLAB_API_URL`; empty: the server's default.                  |
 | `dev.containers.mcpGitlab.readOnly`   | `true`  | `GITLAB_READ_ONLY_MODE`.                                        |
 | `dev.containers.mcpGitlab.toolsets`   | empty   | `GITLAB_TOOLSETS`, comma-separated.                             |
 | `dev.containers.mcpGitlab.env`        | `{}`    | Further variables, e.g. `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`.   |
+| `dev.containers.mcpServers`           | `{}`    | Further MCP servers for pods, as in Kiro's `mcpServers`.        |
 
 This assumes that Kiro starts stdio MCP servers of a remote window on the remote side, where its
-agent extension runs; the pod must reach the GitLab server. A changed setting takes effect on the
+agent extension runs; the pod must reach the servers' hosts. A changed setting takes effect on the
 next attach; reload the window.
-
-### kubectl in WSL
-
-On Windows, kubectl, credential plugins (for example `kubectl oidc-login`) and kubeconfigs are
-often set up only inside WSL. With `dev.containers.kubectlInWSL` (and optionally
-`dev.containers.kubectlWSLDistro`), the extension runs kubectl in that distribution for listing,
-attaching, the connection and port forwarding. If you leave the setting unset, the Kubernetes
-extension's `vs-kubernetes.use-wsl` decides, so _Attach to Kiro_ uses the same kubectl as its
-explorer. That extension always uses the **default** distribution: leave
-`dev.containers.kubectlWSLDistro` empty, or set it to the default one, so both use the same
-distribution. (It also does not read the login profile, so a `KUBECONFIG` set there is seen only
-by this extension.)
-
-- `kubectl` is found through the `PATH` of your login shell, which is read from the login profile
-  (`~/.profile`, `~/.bash_profile` or `~/.zprofile`), **not** from `~/.bashrc`. The same goes for
-  `KUBECONFIG`. Put the lines that add kubectl or krew (`~/.krew/bin`) to `PATH` there, or set
-  `dev.containers.kubectlPath` to the Linux path of kubectl. A Windows path is refused in this mode.
-- kubectl reads the kubeconfig **inside the distribution**, as its default user: `~/.kube/config`,
-  or the file `KUBECONFIG` names in the login profile. If your kubeconfig is on Windows, set
-  `dev.containers.kubeconfigPath` to it. A distribution created with `wsl --import` runs as `root`
-  unless it has a default user.
-- `dev.containers.kubeconfigPath` may be a Linux path, `~/...` (the Linux home directory), a
-  Windows path such as `C:\Users\me\.kube\config` (converted with `wslpath`), or a Windows path
-  into the distribution itself, such as `\\wsl.localhost\Ubuntu-24.04\home\me\.kube\config`.
-  Several files are separated by `;`, as in `KUBECONFIG` on Windows.
-- `dev.containers.kubectlWSLDistro` must be a name that `wsl.exe --list --verbose` shows (case does
-  not matter, dots and dashes do), for example `Ubuntu-24.04` or `Ubuntu`.
-- A window that was attached this way keeps running kubectl in that distribution, even if the
-  settings change later.
-- Sign-in pages that credential plugins open (OIDC, for example `kubectl oidc-login` or
-  `kubelogin`) open in the **Windows default browser**, with the certificates and sign-ins of
-  Windows. For this, kubectl finds a small `xdg-open` first (also set as `BROWSER`), which the
-  extension writes to `~/.cache/devcontainers-kiro/bin` in the distribution and which hands web
-  addresses to Windows (`rundll32.exe url.dll,FileProtocolHandler`, started from the Windows
-  folder). The plugin's redirect back to `http://localhost:<port>` reaches WSL through its
-  localhost forwarding, which is on by default. Set `dev.containers.kubectlWSLBrowser` to `wsl` to
-  let WSL open them instead. kubectl's output is not shown while it waits for the sign-in.
-- The Kubernetes extension's own kubectl does not get this. Credential plugins usually cache the
-  token in the distribution, so after a sign-in through _Attach to Kiro_ its explorer uses it too.
-  If the explorer itself has to sign in and opens a browser in WSL, sign in through _Attach to
-  Kiro_ once, or make web addresses in the distribution open in Windows, for example with this
-  `/usr/local/bin/xdg-open` (`sudo chmod +x` it):
-
-  ```sh
-  #!/bin/sh
-  case "${1-}" in
-    http://*|https://*) cd /mnt/c/Windows && exec ./System32/rundll32.exe url.dll,FileProtocolHandler "$1" ;;
-  esac
-  exec /usr/bin/xdg-open "$@"
-  ```
-
-Without this setting, `dev.containers.kubectlPath` must be a program Windows can start directly,
-such as `kubectl.exe`: a `.cmd` or `.bat` wrapper cannot be used, because kubectl is started
-without a shell.
 
 ## Signing in to Kiro inside a container
 

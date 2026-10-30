@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryLogger } from '../../src/core/logger';
 import { kiroLoginFor } from '../../src/ui/kiroLogin';
-import { mcpGitlabFor, TokenHint } from '../../src/ui/mcpGitlab';
+import { mcpSetupFor, VariableHint } from '../../src/ui/mcp';
 import { readSettings } from '../../src/ui/settings';
 import * as mock from '../helpers/vscodeMock';
 
@@ -161,7 +161,7 @@ describe('kiroLoginFor', () => {
   );
 });
 
-describe('mcpGitlabFor', () => {
+describe('mcpSetupFor', () => {
   let dir: string;
   beforeEach(async () => {
     mock.reset();
@@ -171,16 +171,19 @@ describe('mcpGitlabFor', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  const hint = () => new TokenHint(new mock.MockMemento());
+  const hint = () => new VariableHint(new mock.MockMemento());
 
   it('uses the bundle the extension ships, read-only by default', async () => {
     await mkdir(path.join(dir, 'mcp'));
     await writeFile(path.join(dir, 'mcp', 'mcp-gitlab.mjs'), 'console.log(1);\n');
     mock.state.settings['dev.containers.mcpGitlab.apiUrl'] = 'https://gitlab.example/api/v4';
-    const setup = await mcpGitlabFor('the pod a/b', dir, hint(), new MemoryLogger());
+    const setup = await mcpSetupFor('the pod a/b', dir, hint(), new MemoryLogger());
     expect(setup).toMatchObject({
-      bundle: 'console.log(1);\n',
-      config: { apiUrl: 'https://gitlab.example/api/v4', readOnly: true },
+      gitlab: {
+        bundle: 'console.log(1);\n',
+        config: { apiUrl: 'https://gitlab.example/api/v4', readOnly: true },
+      },
+      servers: {},
     });
   });
 
@@ -188,27 +191,38 @@ describe('mcpGitlabFor', () => {
     const own = path.join(dir, 'own.mjs');
     await writeFile(own, 'console.log(2);\n');
     const logger = new MemoryLogger();
-    expect(await mcpGitlabFor('the pod a/b', dir, hint(), logger)).toBeUndefined();
+    expect(await mcpSetupFor('the pod a/b', dir, hint(), logger)).toBeUndefined();
     mock.state.settings['dev.containers.mcpGitlab.bundlePath'] = own;
-    expect((await mcpGitlabFor('the pod a/b', dir, hint(), logger))?.bundle).toBe(
+    expect((await mcpSetupFor('the pod a/b', dir, hint(), logger))?.gitlab?.bundle).toBe(
       'console.log(2);\n',
     );
     mock.state.settings['dev.containers.mcpGitlab.enabled'] = false;
-    expect(await mcpGitlabFor('the pod a/b', dir, hint(), logger)).toBeUndefined();
+    expect(await mcpSetupFor('the pod a/b', dir, hint(), logger)).toBeUndefined();
   });
 
   it('ignores a bundle path from a workspace', async () => {
     const own = path.join(dir, 'own.mjs');
     await writeFile(own, 'console.log(2);\n');
     mock.state.workspaceSettings['dev.containers.mcpGitlab.bundlePath'] = own;
-    expect(await mcpGitlabFor('the pod a/b', dir, hint(), new MemoryLogger())).toBeUndefined();
+    expect(await mcpSetupFor('the pod a/b', dir, hint(), new MemoryLogger())).toBeUndefined();
   });
 
-  it('shows the hint about a missing token once per pod and window', async () => {
-    const tokenHint = hint();
-    tokenHint.show('the pod a/b');
-    tokenHint.show('the pod a/b');
+  it('passes further servers from the user settings only, also without a bundle', async () => {
+    const confluence = { command: 'npx', args: ['@ai-tools/mcp-confluence@latest'] };
+    mock.state.workspaceSettings['dev.containers.mcpServers'] = { evil: { command: 'x' } };
+    expect(await mcpSetupFor('the pod a/b', dir, hint(), new MemoryLogger())).toBeUndefined();
+    mock.state.settings['dev.containers.mcpServers'] = { confluence };
+    const setup = await mcpSetupFor('the pod a/b', dir, hint(), new MemoryLogger());
+    expect(setup?.gitlab).toBeUndefined();
+    expect(setup?.servers).toEqual({ confluence });
+  });
+
+  it('shows the hint about missing variables once per pod and window', async () => {
+    const variableHint = hint();
+    variableHint.show('the pod a/b', ['GITLAB_PERSONAL_ACCESS_TOKEN']);
+    variableHint.show('the pod a/b', ['GITLAB_PERSONAL_ACCESS_TOKEN']);
     expect(mock.state.warnings).toHaveLength(1);
     expect(mock.state.warnings[0]?.message).toContain('GITLAB_PERSONAL_ACCESS_TOKEN');
+    expect(mock.state.warnings[0]?.message).toContain('do not start');
   });
 });

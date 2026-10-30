@@ -17,7 +17,7 @@ import { RebuildRequests } from './remote/rebuildRequests';
 import { DevContainerResolver } from './remote/resolver';
 import { registerCommands } from './ui/commands';
 import { kiroLoginFor } from './ui/kiroLogin';
-import { mcpGitlabFor, TokenHint } from './ui/mcpGitlab';
+import { mcpSetupFor, VariableHint } from './ui/mcp';
 import { OutputLogger } from './ui/logging';
 import { promptToReopen } from './ui/prompt';
 import { effectiveKubectlScope, kubectlLauncher } from './ui/kubernetes';
@@ -77,7 +77,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const kubectl = new Kubectl((wsl) => kubectlLauncher(wsl), effectiveKubectlScope);
   const kubectlPaths = new PodKubectlPaths(context.globalState);
-  const tokenHint = new TokenHint(context.globalState);
+  const variableHint = new VariableHint(context.globalState);
   const podResolver = new PodResolver({
     logger,
     kubectl,
@@ -87,7 +87,7 @@ export function activate(context: vscode.ExtensionContext): void {
     serverBuild: readServerBuildInfo,
     serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
     kiroLogin,
-    mcpGitlab: (target) => mcpGitlabFor(target, context.extensionPath, tokenHint, logger),
+    mcp: (target) => mcpSetupFor(target, context.extensionPath, variableHint, logger),
   });
   context.subscriptions.push(podResolver);
 

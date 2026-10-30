@@ -26,7 +26,7 @@ import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
 import { PodKubectlPaths } from '../../src/remote/podKubectlPaths';
 import { PodResolver } from '../../src/remote/podResolver';
-import type { McpGitlabSetup } from '../../src/core/mcp/gitlab';
+import type { McpSetup } from '../../src/core/mcp/provision';
 import { askToShareKiroLogin } from '../../src/ui/kiroLogin';
 import { kubectlLauncher } from '../../src/ui/kubernetes';
 import { callLikeTheIde } from '../helpers/ide';
@@ -127,9 +127,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       await rm(path.join(home, '.aws'), { recursive: true, force: true });
     });
 
-    function createResolver(
-      options: { kiroLogin?: string; ask?: boolean; mcpGitlab?: McpGitlabSetup } = {},
-    ): {
+    function createResolver(options: { kiroLogin?: string; ask?: boolean; mcp?: McpSetup } = {}): {
       resolver: PodResolver;
       logger: MemoryLogger;
     } {
@@ -151,7 +149,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
                 text: options.kiroLogin,
                 ...(options.ask ? { confirm: () => askToShareKiroLogin(target) } : {}),
               },
-        mcpGitlab: async () => options.mcpGitlab,
+        mcp: async () => options.mcp,
       });
       cleanups.push(() => resolver.dispose());
       return { resolver, logger };
@@ -317,7 +315,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       });
     });
 
-    describe('the GitLab MCP server', () => {
+    describe('MCP servers', () => {
       const settingsFile = () => path.join(home, '.kiro', 'settings', 'mcp.json');
       afterEach(async () => {
         await rm(path.join(home, '.kiro'), { recursive: true, force: true });
@@ -326,10 +324,12 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       it("is copied into the pod and registered with the server's Node before the IDE connects", async () => {
         const missing: string[] = [];
         const { resolver, logger } = createResolver({
-          mcpGitlab: {
-            bundle: 'console.log("mcp-gitlab");\n',
-            config: { readOnly: true },
-            onTokenMissing: () => missing.push('hint'),
+          mcp: {
+            gitlab: { bundle: 'console.log("mcp-gitlab");\n', config: { readOnly: true } },
+            servers: {
+              confluence: { command: 'npx', env: { CONFLUENCE_TOKEN: '${CONFLUENCE_TOKEN}' } },
+            },
+            onMissingVariables: (names) => missing.push(...names),
           },
         });
         await resolver.resolve(encodePodAuthority(ref));
@@ -337,13 +337,14 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         const bundle = path.join(home, '.pod-test-server', 'mcp', 'mcp-gitlab.mjs');
         expect(await readFile(bundle, 'utf8')).toBe('console.log("mcp-gitlab");\n');
         const settings = JSON.parse(await readFile(settingsFile(), 'utf8')) as {
-          mcpServers: { gitlab: { command: string; args: string[] } };
+          mcpServers: { gitlab: { command: string; args: string[] }; confluence: unknown };
         };
         expect(settings.mcpServers.gitlab.args).toEqual([bundle]);
         expect(settings.mcpServers.gitlab.command).toMatch(/\/node$/);
-        expect(missing).toEqual(['hint']);
+        expect(settings.mcpServers.confluence).toBeDefined();
+        expect(missing).toEqual(['CONFLUENCE_TOKEN', 'GITLAB_PERSONAL_ACCESS_TOKEN']);
         expect(logger.entries.map((e) => e.message)).toContain(
-          'Set up the GitLab MCP server in the pod (~/.kiro/settings/mcp.json).',
+          'Set up the MCP servers gitlab, confluence in the pod (~/.kiro/settings/mcp.json).',
         );
       });
 

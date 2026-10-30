@@ -2,12 +2,18 @@
 
 ## Unreleased
 
-- Attaching to a pod sets up the GitLab MCP server `mcp-gitlab` there when a bundle of it is
-  available (`dev.containers.mcpGitlab.bundlePath`, or `mcp/mcp-gitlab.mjs` shipped with the
-  extension): the bundle is copied below the IDE server's data folder and registered as `gitlab` in
-  `~/.kiro/settings/mcp.json`, run by the IDE server's Node. Other entries and a `gitlab` entry of
-  your own are kept; the token is only referenced as `${GITLAB_PERSONAL_ACCESS_TOKEN}` from the
-  pod's environment, and a missing one is reported. New settings `dev.containers.mcpGitlab.*`.
+- Attaching to a pod registers MCP servers in `~/.kiro/settings/mcp.json` there:
+  - the GitLab MCP server `mcp-gitlab`, when a bundle of it is available
+    (`dev.containers.mcpGitlab.bundlePath`, or `mcp/mcp-gitlab.mjs` shipped with the extension). The
+    bundle is copied below the IDE server's data folder and run with the IDE server's Node; it starts
+    only when `GITLAB_PERSONAL_ACCESS_TOKEN` is set in the pod. Settings `dev.containers.mcpGitlab.*`.
+  - further servers from the new setting `dev.containers.mcpServers` (for example Confluence), in the
+    form of Kiro's `mcpServers`.
+
+  Other entries and entries of your own with the same names are kept, and servers removed from the
+  setting are removed again. Secrets are only written as references to variables of the pod
+  (`${CONFLUENCE_TOKEN}`); entries with a secret in plain text are refused, and variables the pod
+  lacks are reported.
 
 ## 0.2.4 (2026-10-28)
 

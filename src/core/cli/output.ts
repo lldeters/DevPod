@@ -47,6 +47,11 @@ export function redactEnvValues(text: string): string {
 // logs at debug level.
 const SECRET_NAME =
   /token|secret|passw(or)?d|passphrase|credential|auth|cookie|session|jwt|bearer|private_?key|api_?key|access_?key|(key|pat)$/i;
+/** Whether a variable or header called `name` usually holds a secret. */
+export function looksLikeSecretName(name: string): boolean {
+  return SECRET_NAME.test(name);
+}
+
 // Shorter values would also hide ordinary words and numbers in the log.
 const MIN_SECRET_LENGTH = 8;
 

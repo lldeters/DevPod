@@ -22,6 +22,8 @@ export interface Settings {
   kubectlWSLBrowser: KubectlWSLBrowser;
   shareKiroLogin: ShareKiroLogin;
   mcpGitlab: McpGitlabSettings;
+  /** Further MCP servers for pods, as entries of `mcpServers` in Kiro's `mcp.json`. */
+  mcpServers: Record<string, unknown>;
 }
 
 /** The GitLab MCP server that is set up in pods (`dev.containers.mcpGitlab.*`). */
@@ -75,6 +77,12 @@ function shareKiroLogin(value: unknown): ShareKiroLogin {
   return value === 'always' || value === 'never' ? value : 'ask';
 }
 
+function objectValue(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
 function stringRecord(value: unknown): Record<string, string> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
   return Object.fromEntries(
@@ -111,5 +119,6 @@ export function readSettings(): Settings {
       toolsets: nonEmpty(own('mcpGitlab.toolsets')),
       env: stringRecord(own('mcpGitlab.env')),
     },
+    mcpServers: objectValue(own('mcpServers')),
   };
 }

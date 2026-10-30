@@ -59,6 +59,7 @@ export const LOCAL_ONLY_SETTINGS: readonly string[] = [
   'mcpGitlab.readOnly',
   'mcpGitlab.toolsets',
   'mcpGitlab.env',
+  'mcpServers',
 ].map((name) => `dev.containers.${name}`);
 
 /** A key that sets one of them, also as part of a section object (`"dev.containers": { ... }`). */

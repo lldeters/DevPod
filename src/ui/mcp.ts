@@ -5,14 +5,15 @@ import { readFile, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { Logger } from '../core/logger';
-import { checkBundle, MAX_BUNDLE_BYTES, TOKEN_VARIABLE } from '../core/mcp/gitlab';
+import { checkBundle, MAX_BUNDLE_BYTES } from '../core/mcp/gitlab';
 import type { McpGitlabSetup } from '../core/mcp/gitlab';
+import type { McpSetup } from '../core/mcp/provision';
 import { readSettings } from './settings';
 
 /** Where a build of this extension can ship the bundle, relative to the extension's folder. */
 export const BUNDLED_MCP_GITLAB = 'mcp/mcp-gitlab.mjs';
 
-const MUTED_KEY = 'devcontainersKiro.mcpGitlab.tokenHintMuted';
+const MUTED_KEY = 'devcontainersKiro.mcp.variableHintMuted';
 
 async function readBundle(
   file: string,
@@ -45,37 +46,32 @@ async function readBundle(
 }
 
 /**
- * Tells the user once per window and pod that the pod has no token, unless they muted the hint.
- * The hint names the variable only.
+ * Tells the user once per window, pod and set of names that variables the MCP servers need are
+ * not set in the pod, unless they muted the hint. Only names are shown, never values.
  */
-export class TokenHint {
+export class VariableHint {
   private readonly shown = new Set<string>();
 
   constructor(private readonly state: vscode.Memento) {}
 
-  show(target: string): void {
-    if (this.shown.has(target) || this.state.get<boolean>(MUTED_KEY) === true) return;
-    this.shown.add(target);
+  show(target: string, names: readonly string[]): void {
+    const key = `${target}\n${names.join(',')}`;
+    if (this.shown.has(key) || this.state.get<boolean>(MUTED_KEY) === true) return;
+    this.shown.add(key);
     const mute = "Don't Show Again";
     void vscode.window
       .showWarningMessage(
-        `The GitLab MCP server in ${target} cannot sign in to GitLab: set the environment ` +
-          `variable ${TOKEN_VARIABLE} in the pod (for example from a Kubernetes secret).`,
+        `Not set in ${target}: ${names.join(', ')}. The MCP servers that use ` +
+          `${names.length === 1 ? 'it' : 'them'} do not start. Set ` +
+          `${names.length === 1 ? 'it' : 'them'} in the pod, for example from a Kubernetes secret.`,
         mute,
       )
       .then((choice) => (choice === mute ? this.state.update(MUTED_KEY, true) : undefined));
   }
 }
 
-/**
- * The GitLab MCP server to set up in `target`, from the settings of this machine, or `undefined`
- * when it is switched off or there is no bundle: `dev.containers.mcpGitlab.bundlePath`, else the
- * one a build of this extension ships in `mcp/mcp-gitlab.mjs`.
- */
-export async function mcpGitlabFor(
-  target: string,
+async function gitlabSetup(
   extensionPath: string,
-  hint: TokenHint,
   logger: Logger,
 ): Promise<McpGitlabSetup | undefined> {
   const settings = readSettings().mcpGitlab;
@@ -103,6 +99,29 @@ export async function mcpGitlabFor(
       toolsets: settings.toolsets,
       env: settings.env,
     },
-    onTokenMissing: () => hint.show(target),
+  };
+}
+
+/**
+ * The MCP servers to set up in `target`, from the settings of this machine, or `undefined` when
+ * there are none: the GitLab MCP server (unless it is switched off or there is no bundle:
+ * `dev.containers.mcpGitlab.bundlePath`, else the one a build of this extension ships in
+ * `mcp/mcp-gitlab.mjs`), and the servers of `dev.containers.mcpServers`.
+ */
+export async function mcpSetupFor(
+  target: string,
+  extensionPath: string,
+  hint: VariableHint,
+  logger: Logger,
+): Promise<McpSetup | undefined> {
+  const gitlab = await gitlabSetup(extensionPath, logger);
+  const servers = readSettings().mcpServers;
+  if (!gitlab && Object.keys(servers).length === 0) {
+    return undefined;
+  }
+  return {
+    ...(gitlab ? { gitlab } : {}),
+    servers,
+    onMissingVariables: (names) => hint.show(target, names),
   };
 }

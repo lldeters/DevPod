@@ -272,6 +272,46 @@
           "default": "ask",
           "scope": "application",
           "markdownDescription": "Whether this machine's Kiro sign-in (`~/.aws/sso/cache/kiro-auth-token.json`) is copied into the containers and pods you open, so Kiro does not ask to sign in again there. By default you are asked on every connection while the container has no sign-in. An existing sign-in in the container is never replaced and nothing is copied back. **The copy is a credential in the container:** everyone who can run commands there can read it, and it shares one session with this machine, so a token refresh on one side may sign out the other. Can only be set in the user settings."
+        },
+        "dev.containers.mcpGitlab.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "Set up the GitLab MCP server (`mcp-gitlab`) in the pods you attach to and register it as `gitlab` in `~/.kiro/settings/mcp.json` there. Only takes effect when there is a bundle: `#dev.containers.mcpGitlab.bundlePath#`, or one that this build of the extension ships. The token is taken from the variable `GITLAB_PERSONAL_ACCESS_TOKEN` of the pod and never written to a file. When off, nothing is copied or written."
+        },
+        "dev.containers.mcpGitlab.bundlePath": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "ignoreSync": true,
+          "markdownDescription": "Absolute path on this machine of the single-file bundle of `mcp-gitlab` (`mcp-gitlab.mjs`, built with `npm run bundle`). Leave empty to use the bundle this build of the extension ships, if any."
+        },
+        "dev.containers.mcpGitlab.apiUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "`GITLAB_API_URL` for the GitLab MCP server, for example `https://gitlab.example.com/api/v4`. Leave empty for the server's default."
+        },
+        "dev.containers.mcpGitlab.readOnly": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "`GITLAB_READ_ONLY_MODE` for the GitLab MCP server: only tools that do not change anything in GitLab."
+        },
+        "dev.containers.mcpGitlab.toolsets": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "`GITLAB_TOOLSETS` for the GitLab MCP server, a comma-separated list. Leave empty for the server's default."
+        },
+        "dev.containers.mcpGitlab.env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "scope": "application",
+          "markdownDescription": "Further environment variables for the GitLab MCP server in the pod, for example `HTTPS_PROXY` or `NODE_EXTRA_CA_CERTS`. A value can refer to a variable of the pod as `${NAME}`. `GITLAB_PERSONAL_ACCESS_TOKEN` cannot be set here."
         }
       }
     }

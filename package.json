@@ -311,7 +311,7 @@
           },
           "default": {},
           "scope": "application",
-          "markdownDescription": "Further MCP servers that are registered in `~/.kiro/settings/mcp.json` of the pods you attach to, in the same form as `mcpServers` there (`command`, `args`, `env`, `url`, `headers`, `disabled`, `autoApprove`, ...). Secrets are never written: a variable or header whose name looks like one (`TOKEN`, `PASSWORD`, `Authorization`, ...) must refer to a variable of the pod, such as `\"CONFLUENCE_TOKEN\": \"${CONFLUENCE_TOKEN}\"`, which Kiro expands when it starts the server. Entries of your own in the pod with the same name are not replaced, and servers removed here are removed from the pod on the next attach."
+          "markdownDescription": "Further MCP servers that are registered in `~/.kiro/settings/mcp.json` of the pods you attach to, in the same form as `mcpServers` there (`command`, `args`, `env`, `url`, `headers`, `disabled`, `autoApprove`, ...). Secrets are never written: a variable or header whose name looks like one (`TOKEN`, `PASSWORD`, `Authorization`, ...), the value of a flag such as `--token`, a URL parameter such as `api_key` and a password in a URL must refer to a variable of the pod, such as `\"CONFLUENCE_TOKEN\": \"${CONFLUENCE_TOKEN}\"`; Kiro expands it when it starts the server. Entries of your own in the pod with the same name are not replaced. Servers and keys removed here are removed from the pod on the next attach; to remove the last server, leave the setting as `{}`."
         },
         "dev.containers.mcpGitlab.env": {
           "type": "object",
@@ -320,7 +320,7 @@
           },
           "default": {},
           "scope": "application",
-          "markdownDescription": "Further environment variables for the GitLab MCP server in the pod, for example `HTTPS_PROXY` or `NODE_EXTRA_CA_CERTS`. A value can refer to a variable of the pod as `${NAME}`. `GITLAB_PERSONAL_ACCESS_TOKEN` cannot be set here."
+          "markdownDescription": "Further environment variables for the GitLab MCP server in the pod, for example `HTTPS_PROXY` or `NODE_EXTRA_CA_CERTS`. A value can refer to a variable of the pod as `${NAME}`; a variable whose name looks like a secret, and a password in a URL, must be such a reference. `GITLAB_PERSONAL_ACCESS_TOKEN` cannot be set here."
         }
       }
     }

@@ -1,7 +1,8 @@
 // Copyright 2026 The Dev Containers for Kiro authors
 // SPDX-License-Identifier: Apache-2.0
 
-import { DevContainerError } from '../errors';
+import * as path from 'node:path';
+import { DevContainerError, errorMessage } from '../errors';
 import type { Logger } from '../logger';
 import type { ServerExecutor } from '../server/provisioner';
 import {
@@ -11,9 +12,11 @@ import {
   MCP_SERVER_NAME,
   sha256,
 } from './gitlab';
-import type { McpGitlabSetup } from './gitlab';
+import type { McpGitlabSetup, McpServerEntry } from './gitlab';
 import {
   checkServers,
+  hasEntry,
+  isServerName,
   MCP_SETTINGS_RELATIVE_PATH,
   mergeMcpSettings,
   referencedVariables,
@@ -41,7 +44,12 @@ export interface McpTarget {
 
 export type McpOutcome = 'nohome' | 'unchanged' | 'updated';
 
-/** Names of the servers this extension wrote from `dev.containers.mcpServers`, per pod. */
+/**
+ * Which entries of `mcp.json` this extension wrote from `dev.containers.mcpServers`, and which keys
+ * it set in each: `{ "<name>": ["<key>", ...] }`, next to the bundle.
+ */
+type Managed = Record<string, string[]>;
+
 function managedRelativePath(dataFolderName: string): string {
   return bundleRelativePath(dataFolderName).replace(/[^/]+$/, 'managed.json');
 }
@@ -51,37 +59,51 @@ export const MCP_MARKER = 'devcontainers-kiro-mcp';
 
 /**
  * Shared by both scripts: `$HOME` (the user's real one, which the IDE's extension host reads too),
- * and folders below it that must be real directories of this user, created private if missing.
- * Anyone could have created them first in a home directory others may write to.
+ * and folders below it that must be directories of this user, created private if missing. Anyone
+ * could have created them first in a home directory others may write to. A link of the user's own
+ * (from a dotfiles manager, say) to a directory or file of the user's own is followed. Error
+ * messages name paths only; the request is never echoed.
  */
 const SCRIPT_PRELUDE = String.raw`
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 process.on('uncaughtException', (e) => { process.stderr.write(String((e && e.message) || e) + '\n'); process.exit(1); });
 const answer = (value) => process.stdout.write('\n${MCP_MARKER}==' + JSON.stringify(value) + '\n');
 const home = process.env.HOME;
+const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+const mine = (st) => uid === undefined || st.uid === uid;
 function writableHome() {
   try { return !!home && path.isAbsolute(home) && fs.statSync(home).isDirectory() && (fs.accessSync(home, fs.constants.W_OK), true); }
   catch { return false; }
 }
 function ownDir(dir) {
   try { fs.mkdirSync(dir, { mode: 0o700 }); } catch (e) { if (e.code !== 'EEXIST') throw e; }
-  const st = fs.lstatSync(dir);
-  if (!st.isDirectory() || (typeof process.getuid === 'function' && st.uid !== process.getuid())) {
-    throw new Error(dir + ' is not a directory of this user');
-  }
+  const link = fs.lstatSync(dir);
+  const st = link.isSymbolicLink() ? fs.statSync(dir) : link;
+  if (!st.isDirectory() || !mine(link) || !mine(st)) throw new Error(dir + ' is not a directory of this user');
 }
 function ownPath(rel) {
   let dir = home;
   for (const part of rel.split('/').slice(0, -1)) { dir = path.join(dir, part); ownDir(dir); }
-  return path.join(home, rel);
+  const file = path.join(home, rel);
+  let link;
+  try { link = fs.lstatSync(file); } catch (e) { if (e.code === 'ENOENT') return file; throw e; }
+  if (!link.isSymbolicLink()) return file;
+  const real = fs.realpathSync(file);
+  const st = fs.statSync(real);
+  if (!mine(link) || !st.isFile() || !mine(st) || !mine(fs.statSync(path.dirname(real)))) {
+    throw new Error(file + ' links to something that is not a file of this user');
+  }
+  return real;
 }
-const input = () => JSON.parse(fs.readFileSync(0, 'utf8'));
+function input() {
+  try { return JSON.parse(fs.readFileSync(0, 'utf8')); } catch { throw new Error('the request could not be read'); }
+}
 `;
 
 /**
  * Reads the state in the target: whether the home directory is writable, the hash of the bundle
- * there, the text of `mcp.json` and of the list of servers written earlier, and which of the
- * requested variables are not set. Prints nothing else, and never the value of a variable.
+ * there, the text of `mcp.json` and of `managed.json`, and which of the requested variables are not
+ * set. Prints nothing else, and never the value of a variable.
  */
 export const MCP_STATUS_SCRIPT = `${SCRIPT_PRELUDE}
 const req = input();
@@ -99,19 +121,24 @@ answer({
 `;
 
 /**
- * Writes the bundle, \`mcp.json\` and the list of servers written, below the home directory. Each
- * file goes to a new file with an unpredictable name first (nothing already there is written
- * through) and is then renamed into place. \`mcp.json\` keeps its mode; it is not written when it
- * changed since it was read.
+ * Writes \`managed.json\` (first with the entries before and after, so that an entry written by
+ * this run is known as its own even if the run stops halfway), the bundle, \`mcp.json\` and the
+ * final \`managed.json\`. Each file goes to a new file with an unpredictable name in the same
+ * folder (nothing already there is written through), which is removed again on any failure, and is
+ * then renamed into place. \`mcp.json\` keeps its mode; nothing is written when it changed since it
+ * was read.
  */
 export const MCP_WRITE_SCRIPT = `${SCRIPT_PRELUDE}
 const req = input();
 if (!writableHome()) { answer({ home: null }); process.exit(0); }
 function put(rel, text, mode) {
   const file = ownPath(rel);
-  const tmp = file + '.' + crypto.randomBytes(8).toString('hex');
-  fs.writeFileSync(tmp, text, { flag: 'wx', mode });
-  try { fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch {} throw e; }
+  const tmp = path.join(path.dirname(file), '.' + path.basename(file) + '.' + crypto.randomBytes(8).toString('hex'));
+  const fd = fs.openSync(tmp, 'wx', mode);
+  try {
+    try { fs.fchmodSync(fd, mode); fs.writeFileSync(fd, text); } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, file);
+  } catch (e) { try { fs.unlinkSync(tmp); } catch {} throw e; }
 }
 let mode = 0o600;
 if (req.settings) {
@@ -120,6 +147,7 @@ if (req.settings) {
   try { before = fs.readFileSync(file, 'utf8'); mode = fs.statSync(file).mode & 0o777; } catch (e) { if (e.code !== 'ENOENT') throw e; }
   if (before !== req.settings.expected) { answer({ home, settings: 'changed' }); process.exit(0); }
 }
+if (req.managedFirst) put(req.managedFirst.path, req.managedFirst.text, 0o600);
 if (req.bundle) put(req.bundle.path, req.bundle.text, 0o600);
 if (req.settings) put(req.settings.path, req.settings.text, mode);
 if (req.managed) put(req.managed.path, req.managed.text, 0o600);
@@ -132,7 +160,12 @@ export function parseScriptAnswer(stdout: string): Record<string, unknown> {
     .split('\n')
     .reverse()
     .find((l) => l.startsWith(prefix));
-  const value: unknown = line ? JSON.parse(line.slice(prefix.length)) : undefined;
+  let value: unknown;
+  try {
+    value = line ? JSON.parse(line.slice(prefix.length)) : undefined;
+  } catch {
+    value = undefined;
+  }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new DevContainerError(
       'SERVER_INSTALL_FAILED',
@@ -169,26 +202,71 @@ async function runNode(
   return parseScriptAnswer(result.stdout);
 }
 
-function parseManaged(text: unknown): string[] {
-  if (typeof text !== 'string') return [];
+function parseManaged(text: unknown): Managed {
+  if (typeof text !== 'string') return {};
+  let value: unknown;
   try {
-    const value: unknown = JSON.parse(text);
-    return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+    value = JSON.parse(text);
   } catch {
-    return [];
+    return {};
   }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const managed: Managed = {};
+  for (const [name, keys] of Object.entries(value)) {
+    if (isServerName(name) && Array.isArray(keys)) {
+      managed[name] = keys.filter((k): k is string => typeof k === 'string');
+    }
+  }
+  return managed;
+}
+
+function managedText(managed: Managed): string {
+  const sorted = Object.fromEntries(
+    Object.keys(managed)
+      .sort()
+      .map((name) => [name, [...new Set(managed[name])].sort()]),
+  );
+  return `${JSON.stringify(sorted)}\n`;
 }
 
 const NOHOME = 'The user in the pod has no writable home directory, so no MCP servers were set up.';
+
+/** `managed[name]`, also for names such as `constructor` that every object inherits. */
+function keysOf(managed: Managed, name: string): string[] {
+  return Object.hasOwn(managed, name) ? (managed[name] ?? []) : [];
+}
+
+/** The GitLab entry for `bundlePath`, or `undefined` (logged) when the GitLab settings are unusable. */
+function gitlabEntryFor(
+  setup: McpSetup,
+  node: string,
+  logger: Logger,
+): ((bundlePath: string) => McpServerEntry) | undefined {
+  const gitlab = setup.gitlab;
+  if (!gitlab) return undefined;
+  const problem = checkBundle(gitlab.bundle);
+  if (problem) {
+    logger.log('warn', `The bundle of the GitLab MCP server is not used because ${problem}.`);
+    return undefined;
+  }
+  try {
+    buildServerEntry(node, '/', gitlab.config);
+  } catch (error) {
+    logger.log('warn', errorMessage(error));
+    return undefined;
+  }
+  return (bundlePath) => buildServerEntry(node, bundlePath, gitlab.config);
+}
 
 /**
  * Registers MCP servers in Kiro's user-level `~/.kiro/settings/mcp.json` in the target: the GitLab
  * MCP server, whose bundle is copied below the IDE server's data folder and run with the IDE
  * server's Node, and the servers of `dev.containers.mcpServers`. Idempotent: the bundle is copied
  * only when its hash differs, and `mcp.json` is written only when an entry changes. Other entries
- * are kept, an entry of the user's own is never replaced, and servers this extension wrote earlier
- * that are no longer configured are removed. Secrets are never written; entries refer to variables
- * of the pod, and the ones that are not set are reported.
+ * are kept, an entry of the user's own is never replaced, and what this extension wrote earlier but
+ * is no longer configured (servers, keys of a server) is removed. Secrets are never written;
+ * entries refer to variables of the pod, and the ones that are not set are reported. A problem with
+ * one server is logged and does not keep the others from being set up.
  */
 export async function provisionMcpServers(
   executor: ServerExecutor,
@@ -197,19 +275,11 @@ export async function provisionMcpServers(
   logger: Logger,
   signal?: AbortSignal,
 ): Promise<McpOutcome> {
-  if (setup.gitlab) {
-    const problem = checkBundle(setup.gitlab.bundle);
-    if (problem) {
-      throw new DevContainerError(
-        'CONFIG_INVALID',
-        `The bundle of the GitLab MCP server is not used because ${problem}.`,
-      );
-    }
-  }
+  const gitlabEntry = gitlabEntryFor(setup, target.node, logger);
   const { valid, problems } = checkServers(setup.servers);
   const custom: Record<string, McpServerConfig> = {};
   for (const [name, entry] of Object.entries(valid)) {
-    if (setup.gitlab && name === MCP_SERVER_NAME) {
+    if (gitlabEntry && name === MCP_SERVER_NAME) {
       problems.push(
         `The MCP server "${name}" of "dev.containers.mcpServers" is not set up; the GitLab MCP ` +
           'server of this extension has that name. Turn off "dev.containers.mcpGitlab.enabled" to use your own.',
@@ -222,18 +292,16 @@ export async function provisionMcpServers(
 
   const bundleRel = bundleRelativePath(target.dataFolderName);
   const managedRel = managedRelativePath(target.dataFolderName);
-  // The bundle's path does not matter for the variables; it is only known once $HOME is.
-  const gitlabEntry = (bundlePath: string) =>
-    setup.gitlab ? buildServerEntry(target.node, bundlePath, setup.gitlab.config) : undefined;
   const status = await runNode(
     executor,
     target,
     MCP_STATUS_SCRIPT,
     {
-      ...(setup.gitlab ? { bundle: bundleRel } : {}),
+      ...(gitlabEntry ? { bundle: bundleRel } : {}),
       settings: MCP_SETTINGS_RELATIVE_PATH,
       managed: managedRel,
-      variables: referencedVariables([gitlabEntry(''), ...Object.values(custom)]),
+      // The bundle's path does not matter for the variables; it is only known once $HOME is.
+      variables: referencedVariables([gitlabEntry?.('/'), ...Object.values(custom)]),
     },
     signal,
   );
@@ -241,19 +309,27 @@ export async function provisionMcpServers(
     logger.log('warn', NOHOME);
     return 'nohome';
   }
-  const bundlePath = `${status.home.replace(/\/+$/, '')}/${bundleRel}`;
-  const managedBefore = parseManaged(status.managed);
-  const gitlab = gitlabEntry(bundlePath);
+  const bundlePath = path.posix.join(status.home, bundleRel);
+  const before = parseManaged(status.managed);
+  const gitlab = gitlabEntry?.(bundlePath);
+  const wanted: Record<string, McpServerConfig> = {
+    ...custom,
+    ...(gitlab ? { [MCP_SERVER_NAME]: gitlab } : {}),
+  };
   const merged = mergeMcpSettings(typeof status.settings === 'string' ? status.settings : '', {
-    servers: { ...custom, ...(gitlab ? { [MCP_SERVER_NAME]: gitlab } : {}) },
+    servers: wanted,
     isOwn: (name, current) => {
-      if (setup.gitlab && name === MCP_SERVER_NAME) {
+      if (Object.hasOwn(before, name)) return true;
+      if (gitlab && name === MCP_SERVER_NAME) {
         const args = (current as { args?: unknown } | null)?.args;
         return Array.isArray(args) && args[0] === bundlePath;
       }
-      return managedBefore.includes(name);
+      // Also when managed.json was lost: an entry that is already what would be written.
+      const entry = Object.hasOwn(custom, name) ? custom[name] : undefined;
+      return entry !== undefined && hasEntry(current, entry);
     },
-    remove: managedBefore,
+    previousKeys: (name) => keysOf(before, name),
+    remove: Object.keys(before),
   });
   for (const name of merged.foreign) {
     logger.log(
@@ -262,22 +338,28 @@ export async function provisionMcpServers(
         'extension did not write; it was left unchanged. Remove it to let the extension set up its own.',
     );
   }
-  const managedAfter = Object.keys(custom)
-    .filter((name) => !merged.foreign.includes(name))
-    .sort();
-  const managedChanged = JSON.stringify(managedAfter) !== JSON.stringify(managedBefore);
+  const after: Managed = Object.fromEntries(
+    Object.entries(custom)
+      .filter(([name]) => !merged.foreign.includes(name))
+      .map(([name, entry]) => [name, Object.keys(entry)]),
+  );
+  const first: Managed = { ...before };
+  for (const [name, keys] of Object.entries(after)) first[name] = [...keysOf(first, name), ...keys];
+  const writeFirst = managedText(first) !== managedText(before);
+  const writeFinal = managedText(after) !== managedText(first);
   const copyBundle =
-    setup.gitlab !== undefined &&
+    gitlab !== undefined &&
     !merged.foreign.includes(MCP_SERVER_NAME) &&
-    status.bundleHash !== sha256(setup.gitlab.bundle);
+    status.bundleHash !== sha256(setup.gitlab?.bundle ?? '');
 
   let outcome: McpOutcome = 'unchanged';
-  if (copyBundle || merged.changed || managedChanged) {
+  if (copyBundle || merged.changed || writeFirst || writeFinal) {
     const written = await runNode(
       executor,
       target,
       MCP_WRITE_SCRIPT,
       {
+        ...(writeFirst ? { managedFirst: { path: managedRel, text: managedText(first) } } : {}),
         ...(copyBundle && setup.gitlab
           ? { bundle: { path: bundleRel, text: setup.gitlab.bundle } }
           : {}),
@@ -290,9 +372,7 @@ export async function provisionMcpServers(
               },
             }
           : {}),
-        ...(managedChanged
-          ? { managed: { path: managedRel, text: `${JSON.stringify(managedAfter)}\n` } }
-          : {}),
+        ...(writeFinal ? { managed: { path: managedRel, text: managedText(after) } } : {}),
       },
       signal,
     );
@@ -309,25 +389,30 @@ export async function provisionMcpServers(
     if (copyBundle) logger.log('info', `Copied the GitLab MCP server to ${bundlePath} in the pod`);
     outcome = 'updated';
   }
-  const names = [...(gitlab ? [MCP_SERVER_NAME] : []), ...Object.keys(custom)].filter(
-    (name) => !merged.foreign.includes(name),
+  const names = Object.keys(wanted).filter((name) => !merged.foreign.includes(name));
+  const where = `in the pod (~/${MCP_SETTINGS_RELATIVE_PATH})`;
+  const updated = names.filter(
+    (name) => merged.updated.includes(name) || (copyBundle && name === MCP_SERVER_NAME),
   );
-  logger.log(
-    'info',
-    outcome === 'updated'
-      ? `Set up the MCP servers ${names.join(', ') || '(none)'} in the pod (~/${MCP_SETTINGS_RELATIVE_PATH}).`
-      : 'The MCP servers in the pod are up to date.',
-  );
-  const used = new Set(
-    referencedVariables(names.map((name) => (name === MCP_SERVER_NAME ? gitlab : custom[name]))),
-  );
+  if (updated.length > 0) {
+    logger.log('info', `Set up the MCP servers ${updated.join(', ')} ${where}.`);
+  }
+  if (merged.removed.length > 0) {
+    logger.log('info', `Removed the MCP servers ${merged.removed.join(', ')} ${where}.`);
+  }
+  if (updated.length === 0 && merged.removed.length === 0) {
+    logger.log('info', `The MCP servers ${where} are up to date.`);
+  }
+  const used = new Set(referencedVariables(names.map((name) => wanted[name])));
   const missing = Array.isArray(status.missing)
     ? status.missing.filter((v): v is string => typeof v === 'string' && used.has(v))
     : [];
   if (missing.length > 0) {
+    const one = missing.length === 1;
     logger.log(
       'warn',
-      `Not set in the pod: ${missing.join(', ')}. The MCP servers that use them do not start or cannot sign in.`,
+      `Not set in the pod: ${missing.join(', ')}. The MCP servers that need ${one ? 'it' : 'them'} ` +
+        `do not work until ${one ? 'it is' : 'they are'} set.`,
     );
     setup.onMissingVariables?.(missing);
   }

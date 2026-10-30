@@ -2,18 +2,27 @@
 
 ## Unreleased
 
-- Attaching to a pod registers MCP servers in `~/.kiro/settings/mcp.json` there:
-  - the GitLab MCP server `mcp-gitlab`, when a bundle of it is available
-    (`dev.containers.mcpGitlab.bundlePath`, or `mcp/mcp-gitlab.mjs` shipped with the extension). The
-    bundle is copied below the IDE server's data folder and run with the IDE server's Node; it starts
-    only when `GITLAB_PERSONAL_ACCESS_TOKEN` is set in the pod. Settings `dev.containers.mcpGitlab.*`.
-  - further servers from the new setting `dev.containers.mcpServers` (for example Confluence), in the
-    form of Kiro's `mcpServers`.
-
-  Other entries and entries of your own with the same names are kept, and servers removed from the
-  setting are removed again. Secrets are only written as references to variables of the pod
-  (`${CONFLUENCE_TOKEN}`); entries with a secret in plain text are refused, and variables the pod
-  lacks are reported.
+- **MCP servers in pods** (#17): attaching to a pod registers MCP servers in Kiro's
+  `~/.kiro/settings/mcp.json` there, before the IDE connects. Kiro offers no way for an extension to
+  register MCP servers for its agent, so the extension writes that file. Not verified in Kiro yet;
+  `scripts/mcp-dummy-server.mjs` shows where Kiro runs them (`docs/TESTING.md`, section 7c).
+  - The GitLab MCP server `mcp-gitlab`, when a single-file bundle of it is available
+    (`dev.containers.mcpGitlab.bundlePath`, or `mcp/mcp-gitlab.mjs` shipped with a build of the
+    extension). The bundle is copied below the IDE server's data folder when it is missing or
+    differs, and run by the IDE server's Node, so the pod needs no Node. It is read-only by default
+    and starts only when `GITLAB_PERSONAL_ACCESS_TOKEN` is set in the pod. Settings
+    `dev.containers.mcpGitlab.enabled`, `bundlePath`, `apiUrl`, `readOnly`, `toolsets` and `env`.
+  - Further servers from the new setting `dev.containers.mcpServers`, in the form of Kiro's
+    `mcpServers` (for example Confluence with `npx`).
+  - Tokens are written only as references to variables of the pod (`${CONFLUENCE_TOKEN}`). An entry
+    with something that looks like a secret in plain text (a variable or header named like one, the
+    value of a flag such as `--token`, a URL parameter such as `api_key`, a password in a URL) is not
+    written. Variables the entries refer to but the pod lacks are named in a notification.
+  - Other entries, comments and keys added in the pod are kept, an entry of the same name that the
+    extension did not write is never replaced, and servers and keys removed from the settings are
+    removed from the pod on the next attach. Nothing is written when nothing changed.
+  - A problem is logged and does not stop the connection; a problem with one server does not keep
+    the others from being set up.
 
 ## 0.2.4 (2026-10-28)
 

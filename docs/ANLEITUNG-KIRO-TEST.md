@@ -477,6 +477,80 @@ ausführen darf, kann sie lesen (bei einer Anmeldung im Container ist das genaus
 
 ---
 
+## Schritt 13: MCP-Server im Pod (GitLab, Confluence)
+
+Beim Anhängen an einen Pod trägt die Extension MCP-Server in `~/.kiro/settings/mcp.json` **im Pod**
+ein. Ob Kiro sie dort auch startet (und nicht auf deinem Rechner), ist die wichtigste offene Frage.
+Sie klärst du mit einem kleinen Dummy-Server aus diesem Repository, bevor du den echten
+GitLab-Server nimmst.
+
+### 13a: Vorbereiten
+
+1. Installiere die neueste Version aus dem **neuesten grünen Lauf** (wie in 10a) und starte Kiro
+   neu.
+2. Lade [`scripts/mcp-dummy-server.mjs`](../scripts/mcp-dummy-server.mjs) aus dem Repository
+   herunter, zum Beispiel nach `C:\Users\<du>\mcp-dummy-server.mjs`.
+3. Trage in den **Benutzer**-Einstellungen (`settings.json`) den Pfad ein:
+
+   ```jsonc
+   "dev.containers.mcpGitlab.bundlePath": "C:\\Users\\<du>\\mcp-dummy-server.mjs"
+   ```
+
+4. Starte einen Test-Pod **mit** der Token-Variablen. Für den Test reicht ein Platzhalter; der
+   Dummy gibt nie den Wert aus, nur ob sie gesetzt ist:
+
+   ```sh
+   kubectl run kiro-mcp --image=mcr.microsoft.com/devcontainers/javascript-node:22 --env=GITLAB_PERSONAL_ACCESS_TOKEN=dummy --restart=Never --command -- sleep 3600
+   kubectl wait --for=condition=Ready pod/kiro-mcp --timeout=180s
+   ```
+
+### 13b: Prüfen
+
+- [ ] Hänge dich an `kiro-mcp` an (Schritt 11c). Im Protokoll (Ansicht → Ausgabe → „Kiro Dev
+      Containers“) steht
+      `Set up the MCP servers gitlab in the pod (~/.kiro/settings/mcp.json).`
+- [ ] Öffne im Pod-Fenster Kiros MCP-Ansicht. Wird `gitlab` als verbunden angezeigt? (Schick mir
+      einen Screenshot, auch wenn nicht.)
+- [ ] **Die entscheidende Frage:** Bitte den Kiro-Agenten im Pod-Fenster: „Rufe das Tool
+      where_am_i vom MCP-Server gitlab auf.“ Die Antwort nennt `host:`. Steht dort der Name des
+      **Pods** (`kiro-mcp`), läuft der Server im Pod – so ist es gedacht. Steht dort der Name
+      **deines Rechners**, startet Kiro die Server lokal; dann funktioniert die Funktion so nicht,
+      und ich muss sie umbauen.
+- [ ] In derselben Antwort: `GITLAB_PERSONAL_ACCESS_TOKEN: set` heißt, Kiro hat die Variable aus
+      dem Pod übernommen. `not expanded` heißt, Kiro ersetzt `${...}` nicht; `not set` heißt, die
+      Variable kam nicht an.
+- [ ] Lade das Fenster neu (**Developer: Reload Window**). Im Protokoll steht jetzt
+      `The MCP servers in the pod (~/.kiro/settings/mcp.json) are up to date.`
+- [ ] Starte einen zweiten Pod **ohne** `--env=…` und hänge dich an: Es erscheint ein Hinweis, der
+      `GITLAB_PERSONAL_ACCESS_TOKEN` nennt.
+
+### 13c: Mit dem echten GitLab-Server
+
+Wenn 13b geklappt hat: Setze `dev.containers.mcpGitlab.bundlePath` auf das echte Bundle
+(`mcp-gitlab.mjs`, als eine Datei gebaut) und `dev.containers.mcpGitlab.apiUrl` auf die API deines
+GitLab (`https://…/api/v4`). Der Pod braucht das echte Token als Umgebungsvariable, am besten aus
+einem Kubernetes-Secret (ein `export` in `~/.bashrc` reicht **nicht**).
+
+- [ ] Nach dem Anhängen liefert das Tool `whoami` deinen GitLab-Benutzer.
+- [ ] `grep -r "<dein Token>" ~/.kiro ~/.kiro-server/mcp` im Terminal des Pods findet nichts.
+
+### 13d: Weitere Server (zum Beispiel Confluence)
+
+Trage den Server in `dev.containers.mcpServers` ein (Beispiel in der README unter „MCP servers in
+pods“). Das Token gehört **nicht** in die Einstellung, sondern als `"${CONFLUENCE_TOKEN}"` dorthin
+und als Umgebungsvariable in den Pod. Für `npx` braucht das Image Node.js mit npm und Zugriff auf
+die Registry.
+
+- [ ] Der Server erscheint in Kiros MCP-Ansicht im Pod-Fenster.
+- [ ] Schreibst du das Token testweise im Klartext in die Einstellung, wird der Server nicht
+      eingetragen, und das Protokoll sagt, welches Feld (ohne den Wert).
+- [ ] Entfernst du den Server aus der Einstellung (lass `"dev.containers.mcpServers": {}` stehen),
+      ist er nach dem nächsten Anhängen auch aus der `mcp.json` im Pod verschwunden.
+
+Aufräumen: `kubectl delete pod kiro-mcp`.
+
+---
+
 ## Entscheidung: Name und Publisher (kann warten)
 
 Für den Test musst du **nichts** entscheiden. Später, wenn die Extension auf Open VSX

@@ -184,19 +184,38 @@ exec -i --container=... pod -- ...` for a pod.
 
 7. **MCP servers** (`src/core/mcp/`, `src/ui/mcp.ts`). After the server is provisioned and
    before the IDE connects, two Node scripts run with the server's own Node
-   (`kubectl exec -i … <node> -e <script>`, the request as JSON on stdin): the first reports `$HOME`
-   (unless it is not a writable directory), the SHA-256 of the GitLab bundle there, the text of
-   `~/.kiro/settings/mcp.json` and of `managed.json` (the names of the servers of
-   `dev.containers.mcpServers` written earlier), and which of the variables the entries refer to
-   (`${NAME}`) are not set (never their values). Entries whose secret-looking variables or headers
-   are not references are refused beforehand. The entries are merged locally with `jsonc-parser`
-   (comments and other keys are kept). An existing entry is ours if it is `gitlab` with our bundle
-   as first argument, or listed in `managed.json`; others belong to the user and are left alone, and
-   listed entries that are no longer configured are removed. Only if something differs, the second
-   script writes the bundle, `mcp.json` and `managed.json`: each through a new file with a random
-   name that is renamed into place, in folders that must be real directories of the user (created
-   700), and `mcp.json` only if it still has the text that was read, keeping its mode. A problem is
-   logged and does not stop the connection.
+   (`kubectl exec -i … <node> -e <script>`, the request as JSON on stdin, so neither the bundle nor
+   any text of the files appears in an argument list): the first reports `$HOME` (unless it is not
+   a writable directory), the SHA-256 of the GitLab bundle there, the text of
+   `~/.kiro/settings/mcp.json` and of `managed.json`, and which of the variables the entries refer
+   to (`${NAME}`) are not set (never their values). `$HOME` is the one Kiro's extension host sees:
+   the server is started from a `kubectl exec` session too, with the pod's environment.
+   - **Secrets.** Before anything runs, entries of `dev.containers.mcpServers` and
+     `dev.containers.mcpGitlab.env` are checked by name (`src/core/mcp/secrets.ts`): variables and
+     headers named like secrets (the names whose values the log masks), values of flags such as
+     `--token`, URL parameters such as `api_key`, and passwords in URLs must be references. An
+     entry that fails is skipped with a message that names the field, never the value; a problem
+     with the GitLab settings skips only the GitLab server.
+   - **Merging** happens locally with `jsonc-parser`, so comments and other keys are kept (a byte
+     order mark is dropped when the file is changed). Only own properties count, so names such as
+     `constructor` are ordinary names. An existing entry is ours if `managed.json` lists it, if it
+     is `gitlab` with our bundle as first argument, or if it already has every key and value we
+     would write (so that losing `managed.json`, for example with the server's folder, does not
+     orphan entries). Other entries belong to the user and are left alone. `managed.json` records,
+     per server, the keys we set: keys we set before that the setting no longer has are removed,
+     keys added in the pod are kept, and listed servers that are no longer configured are removed.
+     Values are compared regardless of the order of keys.
+   - **Writing.** Only if something differs, the second script writes, in this order, `managed.json`
+     with the servers and keys of before and after, the bundle, `mcp.json` and the final
+     `managed.json`, so a run that stops halfway still knows its entries. Each file goes through a
+     new file with a random name in the same folder, which is removed on any failure, and is then
+     renamed into place. Folders must be directories of the user (created 700); links of the
+     user's own to directories and files of the user's own are followed, so a `mcp.json` of a
+     dotfiles manager stays a link. `mcp.json` keeps its mode and is written only if it still has
+     the text that was read; otherwise nothing is written. Error messages of the scripts name paths
+     only; a request that cannot be read is reported without echoing it.
+   - A problem is logged and does not stop the connection. Without the GitLab bundle and without
+     `dev.containers.mcpServers` (not even `{}`), nothing runs in the pod.
 
 Limits: the pod needs `sh`, `curl` or `wget` and `tar`; `kubectl exec` streams can be cut by proxies
 or API server timeouts on long idle periods (the window then reconnects); the server and what it

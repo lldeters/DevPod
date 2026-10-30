@@ -18,11 +18,13 @@ import {
 } from '../../src/core/config/customizations';
 import { ContainerEngine, execArgs } from '../../src/core/engine/containerEngine';
 import { MemoryLogger } from '../../src/core/logger';
+import { checkMcpEndToEnd } from '../helpers/mcpEndToEnd';
 import { provisionServer } from '../../src/core/server/provisioner';
 import { BRIDGE_SCRIPT } from '../../src/core/server/script';
 import { openTunnel } from '../../src/core/tunnel';
 
 const enabled = process.env['DCK_E2E'] === '1';
+const MCP_TOKEN = 'glpat-e2e-container-secret';
 const cliEntry = require.resolve('@devcontainers/cli/devcontainer.js');
 
 describe.skipIf(!enabled)('dev container end to end', () => {
@@ -49,6 +51,7 @@ describe.skipIf(!enabled)('dev container end to end', () => {
         image: 'mcr.microsoft.com/devcontainers/javascript-node:22',
         postCreateCommand: 'echo created > /tmp/dck-marker',
         remoteEnv: { DCK_E2E_VAR: 'yes' },
+        containerEnv: { GITLAB_PERSONAL_ACCESS_TOKEN: MCP_TOKEN },
         forwardPorts: [3000, 'db:5432'],
         portsAttributes: { '3000': { label: 'App', onAutoForward: 'notify' } },
         customizations: {
@@ -111,6 +114,21 @@ describe.skipIf(!enabled)('dev container end to end', () => {
     const again = await cli.up({ workspaceFolder: workspace });
     expect(again.containerId).toBe(containerId);
   }, 300_000);
+
+  it('registers MCP servers in the container, runs the bundle there and writes no token', async () => {
+    if (!containerId) throw new Error('container was not started');
+    const id = containerId;
+    await checkMcpEndToEnd({
+      executor: engine,
+      target: { containerId: id, user: 'node', node: 'node', dataFolderName: '.e2e-mcp-server' },
+      run: (command, input) =>
+        execFileSync('docker', ['exec', '-i', '-u', 'node', id, ...command], {
+          encoding: 'utf8',
+          input: input ?? '',
+        }),
+      token: MCP_TOKEN,
+    });
+  }, 120_000);
 
   it('installs the server in the container and relays bytes through the bridge', async () => {
     if (!containerId) throw new Error('container was not started');

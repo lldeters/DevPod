@@ -2,14 +2,14 @@
 
 ## Automated
 
-| Command                    | Needs                                                 | Covers                                                                                                                                 |
-| -------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm test`                 | Node                                                  | Unit tests: discovery, JSONC, authority, CLI args/output, server scripts (executed under `sh`), provisioner, bridge relay              |
-| `npm run test:integration` | Node, git                                             | The **real** pinned Dev Container CLI with a docker stub: flag existence, `read-configuration`, Git-root workspace path                |
-| `npm run test:smoke`       | Node, git, a build                                    | Loads the **built** `dist/extension.js` with a stand-in `vscode`, runs _Reopen in Container_ with the bundled CLI                      |
-| `npm run test:e2e:k8s`     | kubectl, a throw-away cluster (kind), `DCK_E2E_K8S=1` | Real pod: attach picker queries, readiness checks, server install through `kubectl exec`, reuse, port relay out of the pod             |
-| `npm run test:e2e`         | Docker, `DCK_E2E=1`                                   | Real container: `up`, lifecycle command, idempotence, server install and reuse, byte-exact bridge                                      |
-| `npm run test:e2e:wsl`     | Windows, WSL, `DCK_E2E_WSL=1` (`DCK_WSL_DISTRO`)      | kubectl in WSL: arguments through `wsl.exe` unchanged, byte-exact stdio, `~` and `wslpath`, login `PATH`, error messages, browser shim |
+| Command                    | Needs                                                 | Covers                                                                                                                                  |
+| -------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                 | Node                                                  | Unit tests: discovery, JSONC, authority, CLI args/output, server scripts (executed under `sh`), provisioner, bridge relay               |
+| `npm run test:integration` | Node, git                                             | The **real** pinned Dev Container CLI with a docker stub: flag existence, `read-configuration`, Git-root workspace path                 |
+| `npm run test:smoke`       | Node, git, a build                                    | Loads the **built** `dist/extension.js` with a stand-in `vscode`, runs _Reopen in Container_ with the bundled CLI                       |
+| `npm run test:e2e:k8s`     | kubectl, a throw-away cluster (kind), `DCK_E2E_K8S=1` | Real pod: attach picker queries, readiness checks, server install through `kubectl exec`, reuse, port relay out of the pod, MCP servers |
+| `npm run test:e2e`         | Docker, `DCK_E2E=1`                                   | Real container: `up`, lifecycle command, idempotence, server install and reuse, byte-exact bridge, MCP servers                          |
+| `npm run test:e2e:wsl`     | Windows, WSL, `DCK_E2E_WSL=1` (`DCK_WSL_DISTRO`)      | kubectl in WSL: arguments through `wsl.exe` unchanged, byte-exact stdio, `~` and `wslpath`, login `PATH`, error messages, browser shim  |
 
 CI runs all of them (`.github/workflows/ci.yml`).
 
@@ -118,6 +118,36 @@ With kubectl installed only inside WSL and `dev.containers.kubectlInWSL` set to 
       WSL opens it instead.
 - [ ] Turning the setting off and reloading a window that was attached in WSL still connects
       through WSL.
+
+### 7c. MCP servers in pods
+
+First check where Kiro runs the MCP servers of a pod window, with the dummy server of this
+repository: set `dev.containers.mcpGitlab.bundlePath` to the absolute path of
+`scripts/mcp-dummy-server.mjs`, and start a pod that has the token variable:
+
+```sh
+kubectl run kiro-mcp --image=mcr.microsoft.com/devcontainers/javascript-node:22 \
+  --env=GITLAB_PERSONAL_ACCESS_TOKEN=dummy --restart=Never --command -- sleep 3600
+```
+
+- [ ] After attaching, the log says _Set up the MCP servers gitlab in the pod
+      (~/.kiro/settings/mcp.json)._, and Kiro's MCP view in the pod window shows `gitlab` as
+      connected (record what it shows if not).
+- [ ] Asking the agent to call the tool `where_am_i` of `gitlab` answers with the **pod's** host
+      name and `GITLAB_PERSONAL_ACCESS_TOKEN: set`. If it names this machine, Kiro starts the MCP
+      servers of a remote window locally, and this feature cannot work as built (record it). The
+      answer `not expanded` means that Kiro does not expand `${...}` in `env`.
+- [ ] Attaching again (reload the window) changes nothing: the log says _The MCP servers in the pod
+      (~/.kiro/settings/mcp.json) are up to date._
+- [ ] In a pod started without `GITLAB_PERSONAL_ACCESS_TOKEN`, a notification names the variable.
+- [ ] An entry `gitlab` that you wrote yourself into the pod's `mcp.json` stays as it is (log:
+      _... that this extension did not write; it was left unchanged._).
+- [ ] With `dev.containers.mcpGitlab.enabled` set to `false`, a new pod gets no `~/.kiro`.
+- [ ] With the real `mcp-gitlab` bundle and a real token in the pod, its `whoami` returns your
+      GitLab user.
+- [ ] A server in `dev.containers.mcpServers` (for example Confluence with `npx`, in a pod with
+      Node.js and npm) appears in the MCP view; a token in plain text in it is refused (log), and
+      removing the server from the setting removes it from the pod on the next attach.
 
 ### 8. Windows not opened by the extension
 

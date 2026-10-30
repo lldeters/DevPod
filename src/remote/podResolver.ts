@@ -105,12 +105,12 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
     report: (message: string) => void,
     signal: AbortSignal,
   ): Promise<void> {
-    const setup = await this.deps.mcp?.(name);
-    if (!setup) {
-      return;
-    }
-    report('Setting up MCP servers in the pod…');
     try {
+      const setup = await this.deps.mcp?.(name);
+      if (!setup) {
+        return;
+      }
+      report('Setting up MCP servers in the pod…');
       await provisionMcpServers(
         executor,
         { containerId, node, dataFolderName },

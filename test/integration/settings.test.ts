@@ -217,12 +217,28 @@ describe('mcpSetupFor', () => {
     expect(setup?.servers).toEqual({ confluence });
   });
 
+  it('still sets up when the setting is an empty object, so that servers written before are removed', async () => {
+    mock.state.settings['dev.containers.mcpServers'] = {};
+    expect((await mcpSetupFor('the pod a/b', dir, hint(), new MemoryLogger()))?.servers).toEqual(
+      {},
+    );
+  });
+
+  it('ignores values that only the settings in the pod have', async () => {
+    mock.state.remoteName = 'k8s-pod';
+    mock.state.remoteSettings['dev.containers.mcpServers'] = { evil: { command: 'x' } };
+    mock.state.remoteSettings['dev.containers.mcpGitlab.bundlePath'] = path.join(dir, 'x.mjs');
+    expect(await mcpSetupFor('the pod a/b', dir, hint(), new MemoryLogger())).toBeUndefined();
+  });
+
   it('shows the hint about missing variables once per pod and window', async () => {
     const variableHint = hint();
     variableHint.show('the pod a/b', ['GITLAB_PERSONAL_ACCESS_TOKEN']);
     variableHint.show('the pod a/b', ['GITLAB_PERSONAL_ACCESS_TOKEN']);
     expect(mock.state.warnings).toHaveLength(1);
     expect(mock.state.warnings[0]?.message).toContain('GITLAB_PERSONAL_ACCESS_TOKEN');
-    expect(mock.state.warnings[0]?.message).toContain('do not start');
+    expect(mock.state.warnings[0]?.message).toContain('do not work until it is set');
+    variableHint.show('the pod a/b', ['A_TOKEN', 'B_TOKEN']);
+    expect(mock.state.warnings[1]?.message).toContain('A_TOKEN, B_TOKEN');
   });
 });

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.5 (2026-10-30)
 
 - **MCP servers in pods** (#17): attaching to a pod registers MCP servers in Kiro's
   `~/.kiro/settings/mcp.json` there, before the IDE connects. Kiro offers no way for an extension to

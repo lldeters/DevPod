@@ -145,6 +145,60 @@ attached with, which this extension keeps on your machine (attach again after ch
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.
 
+### kubectl in WSL
+
+On Windows, kubectl, credential plugins (for example `kubectl oidc-login`) and kubeconfigs are
+often set up only inside WSL. With `dev.containers.kubectlInWSL` (and optionally
+`dev.containers.kubectlWSLDistro`), the extension runs kubectl in that distribution for listing,
+attaching, the connection and port forwarding. If you leave the setting unset, the Kubernetes
+extension's `vs-kubernetes.use-wsl` decides, so _Attach to Kiro_ uses the same kubectl as its
+explorer. That extension always uses the **default** distribution: leave
+`dev.containers.kubectlWSLDistro` empty, or set it to the default one, so both use the same
+distribution. (It also does not read the login profile, so a `KUBECONFIG` set there is seen only
+by this extension.)
+
+- `kubectl` is found through the `PATH` of your login shell, which is read from the login profile
+  (`~/.profile`, `~/.bash_profile` or `~/.zprofile`), **not** from `~/.bashrc`. The same goes for
+  `KUBECONFIG`. Put the lines that add kubectl or krew (`~/.krew/bin`) to `PATH` there, or set
+  `dev.containers.kubectlPath` to the Linux path of kubectl. A Windows path is refused in this mode.
+- kubectl reads the kubeconfig **inside the distribution**, as its default user: `~/.kube/config`,
+  or the file `KUBECONFIG` names in the login profile. If your kubeconfig is on Windows, set
+  `dev.containers.kubeconfigPath` to it. A distribution created with `wsl --import` runs as `root`
+  unless it has a default user.
+- `dev.containers.kubeconfigPath` may be a Linux path, `~/...` (the Linux home directory), a
+  Windows path such as `C:\Users\me\.kube\config` (converted with `wslpath`), or a Windows path
+  into the distribution itself, such as `\\wsl.localhost\Ubuntu-24.04\home\me\.kube\config`.
+  Several files are separated by `;`, as in `KUBECONFIG` on Windows.
+- `dev.containers.kubectlWSLDistro` must be a name that `wsl.exe --list --verbose` shows (case does
+  not matter, dots and dashes do), for example `Ubuntu-24.04` or `Ubuntu`.
+- A window that was attached this way keeps running kubectl in that distribution, even if the
+  settings change later.
+- Sign-in pages that credential plugins open (OIDC, for example `kubectl oidc-login` or
+  `kubelogin`) open in the **Windows default browser**, with the certificates and sign-ins of
+  Windows. For this, kubectl finds a small `xdg-open` first (also set as `BROWSER`), which the
+  extension writes to `~/.cache/devcontainers-kiro/bin` in the distribution and which hands web
+  addresses to Windows (`rundll32.exe url.dll,FileProtocolHandler`, started from the Windows
+  folder). The plugin's redirect back to `http://localhost:<port>` reaches WSL through its
+  localhost forwarding, which is on by default. Set `dev.containers.kubectlWSLBrowser` to `wsl` to
+  let WSL open them instead. kubectl's output is not shown while it waits for the sign-in.
+- The Kubernetes extension's own kubectl does not get this. Credential plugins usually cache the
+  token in the distribution, so after a sign-in through _Attach to Kiro_ its explorer uses it too.
+  If the explorer itself has to sign in and opens a browser in WSL, sign in through _Attach to
+  Kiro_ once, or make web addresses in the distribution open in Windows, for example with this
+  `/usr/local/bin/xdg-open` (`sudo chmod +x` it):
+
+  ```sh
+  #!/bin/sh
+  case "${1-}" in
+    http://*|https://*) cd /mnt/c/Windows && exec ./System32/rundll32.exe url.dll,FileProtocolHandler "$1" ;;
+  esac
+  exec /usr/bin/xdg-open "$@"
+  ```
+
+Without this setting, `dev.containers.kubectlPath` must be a program Windows can start directly,
+such as `kubectl.exe`: a `.cmd` or `.bat` wrapper cannot be used, because kubectl is started
+without a shell.
+
 ### MCP servers in pods
 
 Kiro's agent reads MCP servers only from `.kiro/settings/mcp.json` (workspace) or

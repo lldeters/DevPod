@@ -53,11 +53,22 @@ export const LOCAL_ONLY_SETTINGS: readonly string[] = [
   'kubectlWSLDistro',
   'kubectlWSLBrowser',
   'shareKiroLogin',
+  'mcpGitlab.enabled',
+  'mcpGitlab.bundlePath',
+  'mcpGitlab.apiUrl',
+  'mcpGitlab.readOnly',
+  'mcpGitlab.toolsets',
+  'mcpGitlab.env',
 ].map((name) => `dev.containers.${name}`);
 
 /** A key that sets one of them, also as part of a section object (`"dev.containers": { ... }`). */
 function isLocalOnlySetting(key: string): boolean {
-  return key === 'dev' || key === 'dev.containers' || LOCAL_ONLY_SETTINGS.includes(key);
+  return (
+    key === 'dev' ||
+    key === 'dev.containers' ||
+    key === 'dev.containers.mcpGitlab' ||
+    LOCAL_ONLY_SETTINGS.includes(key)
+  );
 }
 
 /**

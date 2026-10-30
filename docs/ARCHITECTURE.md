@@ -182,6 +182,18 @@ exec -i --container=... pod -- ...` for a pod.
    like the kubeconfig, so a window keeps it when the settings change; every kubectl call of that
    window (query, provisioning, bridge, tunnels) goes through it.
 
+7. **GitLab MCP server** (`src/core/mcp/gitlab.ts`, `src/ui/mcpGitlab.ts`). After the server is
+   provisioned and before the IDE connects, two Node scripts run with the server's own Node
+   (`kubectl exec -i … <node> -e <script>`, the request as JSON on stdin): the first reports
+   `$HOME` (unless it is not a writable directory), the SHA-256 of the bundle there, the text of
+   `~/.kiro/settings/mcp.json` and whether `GITLAB_PERSONAL_ACCESS_TOKEN` is set (never its value).
+   The entry is merged locally with `jsonc-parser` (comments and other keys are kept; an entry whose
+   first argument is not our bundle belongs to the user and is left alone). Only if something
+   differs, the second script writes the bundle and/or `mcp.json`: each through a new file with a
+   random name that is renamed into place, in folders that must be real directories of the user
+   (created 700), and `mcp.json` only if it still has the text that was read, keeping its mode. A
+   problem is logged and does not stop the connection.
+
 Limits: the pod needs `sh`, `curl` or `wget` and `tar`; `kubectl exec` streams can be cut by proxies
 or API server timeouts on long idle periods (the window then reconnects); the server and what it
 installed disappear with the pod.

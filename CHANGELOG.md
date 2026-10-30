@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Attaching to a pod sets up the GitLab MCP server `mcp-gitlab` there when a bundle of it is
+  available (`dev.containers.mcpGitlab.bundlePath`, or `mcp/mcp-gitlab.mjs` shipped with the
+  extension): the bundle is copied below the IDE server's data folder and registered as `gitlab` in
+  `~/.kiro/settings/mcp.json`, run by the IDE server's Node. Other entries and a `gitlab` entry of
+  your own are kept; the token is only referenced as `${GITLAB_PERSONAL_ACCESS_TOKEN}` from the
+  pod's environment, and a missing one is reported. New settings `dev.containers.mcpGitlab.*`.
+
 ## 0.2.4 (2026-10-28)
 
 - The settings for programs and paths (`dockerPath`, `dockerComposePath`, `devcontainerCliPath`,

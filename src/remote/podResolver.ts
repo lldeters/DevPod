@@ -16,6 +16,8 @@ import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { decodePodAuthority } from '../core/k8s/podRef';
 import type { PodRef } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
+import { provisionMcpGitlab } from '../core/mcp/gitlab';
+import type { McpGitlabSetup } from '../core/mcp/gitlab';
 import type { ServerBuildInfo } from '../core/server/productInfo';
 import { provisionServer } from '../core/server/provisioner';
 import type { KiroLoginShare } from '../core/server/provisioner';
@@ -39,6 +41,8 @@ export interface PodResolverDependencies {
   serverUrlTemplate: () => string | undefined;
   /** This machine's Kiro sign-in to offer to the named target, or `undefined` if it is not shared. */
   kiroLogin: (target: string) => Promise<KiroLoginShare | undefined>;
+  /** The GitLab MCP server to set up in the named target, or `undefined` if none is. */
+  mcpGitlab?: (target: string) => Promise<McpGitlabSetup | undefined>;
 }
 
 /**
@@ -86,6 +90,43 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
     return share
       ? { kiroLogin: share.text, ...(share.confirm ? { confirmKiroLogin: share.confirm } : {}) }
       : {};
+  }
+
+  /**
+   * The GitLab MCP server is a convenience: a problem is logged and does not stop the connection
+   * (unless it was cancelled). It runs before the IDE connects, so Kiro finds it on its first start.
+   */
+  private async setUpMcpGitlab(
+    executor: KubectlExecutor,
+    containerId: string,
+    node: string,
+    dataFolderName: string,
+    name: string,
+    report: (message: string) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const setup = await this.deps.mcpGitlab?.(name);
+    if (!setup) {
+      return;
+    }
+    report('Setting up the GitLab MCP server in the pod…');
+    try {
+      await provisionMcpGitlab(
+        executor,
+        { containerId, node, dataFolderName },
+        setup,
+        this.deps.logger,
+        signal,
+      );
+    } catch (error) {
+      if (signal.aborted) {
+        throw error;
+      }
+      this.deps.logger.log(
+        'warn',
+        `Could not set up the GitLab MCP server: ${errorMessage(error)}`,
+      );
+    }
   }
 
   private async withCurrentContext(ref: PodRef, launcher: KubectlLauncher): Promise<PodRef> {
@@ -150,6 +191,16 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
             ...(await this.loginInput(`the pod ${ref.namespace}/${ref.pod}`)),
           },
           logger,
+          abort.signal,
+        );
+
+        await this.setUpMcpGitlab(
+          new KubectlExecutor(launcher, pinned),
+          target.label,
+          server.node,
+          build.serverDataFolderName,
+          `the pod ${ref.namespace}/${ref.pod}`,
+          (message) => progress.report({ message }),
           abort.signal,
         );
 

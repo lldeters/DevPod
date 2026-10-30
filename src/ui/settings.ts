@@ -21,6 +21,17 @@ export interface Settings {
   kubectlWSLDistro: string | undefined;
   kubectlWSLBrowser: KubectlWSLBrowser;
   shareKiroLogin: ShareKiroLogin;
+  mcpGitlab: McpGitlabSettings;
+}
+
+/** The GitLab MCP server that is set up in pods (`dev.containers.mcpGitlab.*`). */
+export interface McpGitlabSettings {
+  enabled: boolean;
+  bundlePath: string | undefined;
+  apiUrl: string | undefined;
+  readOnly: boolean;
+  toolsets: string | undefined;
+  env: Record<string, string>;
 }
 
 /** What `inspect` returns at runtime; the local and remote parts are not in the API typings. */
@@ -64,6 +75,15 @@ function shareKiroLogin(value: unknown): ShareKiroLogin {
   return value === 'always' || value === 'never' ? value : 'ask';
 }
 
+function stringRecord(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  );
+}
+
 function logLevel(value: unknown): Settings['logLevel'] {
   return value === 'debug' || value === 'trace' ? value : 'info';
 }
@@ -83,5 +103,13 @@ export function readSettings(): Settings {
     kubectlWSLDistro: nonEmpty(own('kubectlWSLDistro')),
     kubectlWSLBrowser: own('kubectlWSLBrowser') === 'wsl' ? 'wsl' : 'windows',
     shareKiroLogin: shareKiroLogin(own('shareKiroLogin')),
+    mcpGitlab: {
+      enabled: own('mcpGitlab.enabled') !== false,
+      bundlePath: nonEmpty(own('mcpGitlab.bundlePath')),
+      apiUrl: nonEmpty(own('mcpGitlab.apiUrl')),
+      readOnly: own('mcpGitlab.readOnly') !== false,
+      toolsets: nonEmpty(own('mcpGitlab.toolsets')),
+      env: stringRecord(own('mcpGitlab.env')),
+    },
   };
 }

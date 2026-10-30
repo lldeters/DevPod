@@ -108,6 +108,7 @@ opens a menu to rebuild, reopen locally, open the configuration or show the log.
 | `dev.containers.kubectlWSLDistro`          | empty     | The WSL distribution for that; empty means the default one.               |
 | `dev.containers.kubectlWSLBrowser`         | `windows` | Where sign-in pages of kubectl in WSL open: `windows` or `wsl`.           |
 | `dev.containers.shareKiroLogin`            | `ask`     | Copy this machine's Kiro sign-in into containers and pods (see below).    |
+| `dev.containers.mcpGitlab.*`               |           | The GitLab MCP server in pods (see [below](#gitlab-mcp-server-in-pods)).  |
 
 Except for `logLevel` and `promptToReopen`, these settings can only be set in the user settings.
 They apply to this machine, also in container and pod windows, and are never taken from a
@@ -143,6 +144,42 @@ attached with, which this extension keeps on your machine (attach again after ch
 
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.
+
+### GitLab MCP server in pods
+
+Kiro's agent reads MCP servers only from `.kiro/settings/mcp.json` (workspace) or
+`~/.kiro/settings/mcp.json`; an extension cannot register one for it. So, when there is a bundle of
+`mcp-gitlab` (a single `mcp-gitlab.mjs` built with `npm run bundle`,
+which needs no `node_modules`), the extension sets it up on every attach to a pod:
+
+- The bundle is copied to `~/<server data folder>/mcp/mcp-gitlab.mjs` (for Kiro
+  `~/.kiro-server/mcp/mcp-gitlab.mjs`) in the pod, only when it is missing or its SHA-256 differs.
+- `~/.kiro/settings/mcp.json` in the pod gets the entry `mcpServers.gitlab`, with the Node of the
+  IDE server in the pod as `command` (the pod needs no Node of its own) and the bundle as argument.
+  Other servers, other keys and comments are kept; keys you add to the entry (`disabled`,
+  `autoApprove`) too. The file is written only when the entry changes. A `gitlab` entry that the
+  extension did not write (its argument is not the bundle) is never replaced; the log says so.
+- The token is never written: the entry sets `GITLAB_PERSONAL_ACCESS_TOKEN` to
+  `${GITLAB_PERSONAL_ACCESS_TOKEN}`, which Kiro takes from the environment of the pod. Set that
+  variable in the pod (for example from a Kubernetes secret); without it, the server starts but
+  GitLab answers 401, and a notification names the variable once per window.
+
+Where the bundle comes from: `dev.containers.mcpGitlab.bundlePath` (an absolute path on this
+machine), else `mcp/mcp-gitlab.mjs` inside the extension, which a build of this extension can ship
+(`.vscodeignore` packages that file). Without either, nothing happens.
+
+| Setting                               | Default | Purpose                                                         |
+| ------------------------------------- | ------- | --------------------------------------------------------------- |
+| `dev.containers.mcpGitlab.enabled`    | `true`  | `false`: nothing is copied or written.                          |
+| `dev.containers.mcpGitlab.bundlePath` | empty   | The bundle on this machine; empty: the one the extension ships. |
+| `dev.containers.mcpGitlab.apiUrl`     | empty   | `GITLAB_API_URL`; empty: the server's default.                  |
+| `dev.containers.mcpGitlab.readOnly`   | `true`  | `GITLAB_READ_ONLY_MODE`.                                        |
+| `dev.containers.mcpGitlab.toolsets`   | empty   | `GITLAB_TOOLSETS`, comma-separated.                             |
+| `dev.containers.mcpGitlab.env`        | `{}`    | Further variables, e.g. `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`.   |
+
+This assumes that Kiro starts stdio MCP servers of a remote window on the remote side, where its
+agent extension runs; the pod must reach the GitLab server. A changed setting takes effect on the
+next attach; reload the window.
 
 ### kubectl in WSL
 

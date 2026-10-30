@@ -26,6 +26,7 @@ import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
 import { PodKubectlPaths } from '../../src/remote/podKubectlPaths';
 import { PodResolver } from '../../src/remote/podResolver';
+import type { McpGitlabSetup } from '../../src/core/mcp/gitlab';
 import { askToShareKiroLogin } from '../../src/ui/kiroLogin';
 import { kubectlLauncher } from '../../src/ui/kubernetes';
 import { callLikeTheIde } from '../helpers/ide';
@@ -126,7 +127,9 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       await rm(path.join(home, '.aws'), { recursive: true, force: true });
     });
 
-    function createResolver(options: { kiroLogin?: string; ask?: boolean } = {}): {
+    function createResolver(
+      options: { kiroLogin?: string; ask?: boolean; mcpGitlab?: McpGitlabSetup } = {},
+    ): {
       resolver: PodResolver;
       logger: MemoryLogger;
     } {
@@ -148,6 +151,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
                 text: options.kiroLogin,
                 ...(options.ask ? { confirm: () => askToShareKiroLogin(target) } : {}),
               },
+        mcpGitlab: async () => options.mcpGitlab,
       });
       cleanups.push(() => resolver.dispose());
       return { resolver, logger };
@@ -310,6 +314,43 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         const { resolver } = createResolver();
         await resolver.resolve(encodePodAuthority(ref));
         await expect(stat(loginFile())).rejects.toThrow();
+      });
+    });
+
+    describe('the GitLab MCP server', () => {
+      const settingsFile = () => path.join(home, '.kiro', 'settings', 'mcp.json');
+      afterEach(async () => {
+        await rm(path.join(home, '.kiro'), { recursive: true, force: true });
+      });
+
+      it("is copied into the pod and registered with the server's Node before the IDE connects", async () => {
+        const missing: string[] = [];
+        const { resolver, logger } = createResolver({
+          mcpGitlab: {
+            bundle: 'console.log("mcp-gitlab");\n',
+            config: { readOnly: true },
+            onTokenMissing: () => missing.push('hint'),
+          },
+        });
+        await resolver.resolve(encodePodAuthority(ref));
+
+        const bundle = path.join(home, '.pod-test-server', 'mcp', 'mcp-gitlab.mjs');
+        expect(await readFile(bundle, 'utf8')).toBe('console.log("mcp-gitlab");\n');
+        const settings = JSON.parse(await readFile(settingsFile(), 'utf8')) as {
+          mcpServers: { gitlab: { command: string; args: string[] } };
+        };
+        expect(settings.mcpServers.gitlab.args).toEqual([bundle]);
+        expect(settings.mcpServers.gitlab.command).toMatch(/\/node$/);
+        expect(missing).toEqual(['hint']);
+        expect(logger.entries.map((e) => e.message)).toContain(
+          'Set up the GitLab MCP server in the pod (~/.kiro/settings/mcp.json).',
+        );
+      });
+
+      it('leaves the pod alone when it is not set up', async () => {
+        const { resolver } = createResolver();
+        await resolver.resolve(encodePodAuthority(ref));
+        await expect(stat(settingsFile())).rejects.toThrow();
       });
     });
 

@@ -181,19 +181,26 @@ if [ -n "$USE_FLOCK" ]; then
   done
 fi
 # Every run also takes the lock directory, which is all that runs without flock know, and older
-# versions of this extension in windows that were not reloaded. Its owner is recorded so that a
-# lock left behind by a killed run can be taken over; it is written right after the lock is
-# created, so a lock without one for a whole minute was left by a run killed in between, not by a
-# slow one. (Two runs that find the same stale lock can both go on; runs that hold flock never
-# get here at the same time.)
+# versions of this extension in windows that were not reloaded. A run holds it once it has created
+# the directory and, exclusively (set -C), the owner file in it: mkdir alone is not enough, since
+# some mkdir report success when another run creates the directory at the same moment (uutils'
+# mkdir 0.0.24, for one). The owner is recorded so that a lock left behind by a killed run can be
+# taken over; a lock without one for a whole minute was left by a run killed in between, not by a
+# slow one. A lock is removed only while it still names the holder that was found gone: a holder
+# that ended normally has removed its lock itself, and the next run may hold a new one by then.
+# (Two runs that find the same stale lock can still both go on; runs that hold flock never get
+# here at the same time.)
 OWNER="$$ $(proc_start $$)"
 UNOWNED=0
-until mkdir "$ROOT/setup.lock" 2>/dev/null; do
+until mkdir "$ROOT/setup.lock" 2>/dev/null \\
+  && ( set -C; echo "$OWNER" > "$ROOT/setup.lock/owner" ) 2>/dev/null; do
   HOLDER="$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)"
   if [ -n "$HOLDER" ]; then UNOWNED=0; else UNOWNED=$((UNOWNED + 1)); fi
   # shellcheck disable=SC2086 # the owner file holds "<pid> <start time>"
   if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 60 ]; then
-    rm -rf "$ROOT/setup.lock"
+    if [ "$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)" = "$HOLDER" ]; then
+      rm -rf "$ROOT/setup.lock"
+    fi
     continue
   fi
   [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.lock)"
@@ -201,7 +208,6 @@ until mkdir "$ROOT/setup.lock" 2>/dev/null; do
   sleep 1
 done
 LOCK_DIR="$ROOT/setup.lock"
-echo "$OWNER" > "$LOCK_DIR/owner"
 
 if [ ! -f "$SERVER_DIR/.installed" ]; then
   TMP_DIR="$(mktemp -d "$ROOT/tmp.XXXXXX")" || fail "mktemp failed"

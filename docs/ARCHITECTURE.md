@@ -45,9 +45,14 @@ src/ui/       Commands, status bar item, reopen prompt, setup of argv.json, logg
    a file of the run first; the kernel releases it when a run ends, however it ends; the download,
    unpacking and the server are started without its descriptor, so they cannot keep it), and then
    with a lock directory (`setup.lock`, owner recorded, taken over when the owner is gone), which
-   is all that runs without `flock` and older versions of the extension know. Runs that hold
-   `flock` never wait for the directory at the same time, so they cannot both take over a stale
-   one. The download must be `https` (or `file`), also
+   is all that runs without `flock` and older versions of the extension know. A run holds it only
+   once it has created both the directory and, exclusively (`set -C`, so `O_EXCL`), the `owner`
+   file in it: `mkdir` alone is not enough, since some `mkdir` report success when another process
+   creates the directory at the same moment (uutils' `mkdir` 0.0.24, for one; this showed up on
+   GitHub's Ubuntu 26.04 runners). A stale lock is removed only while its owner file still names
+   the holder that was found gone, so a run never removes the lock of the next holder when the
+   previous one ended normally in between. Runs that hold `flock` never wait for the directory at
+   the same time, so they cannot both take over a stale one. The download must be `https` (or `file`), also
    after redirects: `curl` refuses others (`--proto-redir`); with `wget`, its response headers
    (`-S`) are checked and a `Location` that is neither `https://` nor a path fails the download,
    and a `wget` that shows no headers on stderr (Wget2) is refused. Kiro publishes no checksum or

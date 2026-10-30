@@ -23,6 +23,11 @@
     removed from the pod on the next attach. Nothing is written when nothing changed.
   - A problem is logged and does not stop the connection; a problem with one server does not keep
     the others from being set up.
+- Server setup without `flock`: two windows that connect at the same moment no longer both start a
+  server where `mkdir` is not atomic, that is, reports success to two processes at once (uutils'
+  `mkdir` 0.0.24, for one); the lock is now held only by the run that also creates its owner file.
+  A run that finds the lock's holder gone no longer removes the lock that the next run took
+  meanwhile.
 
 ## 0.2.4 (2026-10-28)
 

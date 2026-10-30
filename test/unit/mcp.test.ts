@@ -1,5 +1,7 @@
 import {
   chmod,
+  chown,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -14,7 +16,12 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryLogger } from '../../src/core/logger';
 import { buildServerEntry, serverEnv } from '../../src/core/mcp/gitlab';
-import { provisionMcpServers } from '../../src/core/mcp/provision';
+import {
+  MCP_STATUS_SCRIPT,
+  MCP_WRITE_SCRIPT,
+  parseScriptAnswer,
+  provisionMcpServers,
+} from '../../src/core/mcp/provision';
 import type { McpSetup } from '../../src/core/mcp/provision';
 import { checkServers, mergeMcpSettings, referencedVariables } from '../../src/core/mcp/servers';
 import { runProcess } from '../../src/core/process';
@@ -59,6 +66,24 @@ describe('serverEnv', () => {
     ).toThrow(/cannot be set/);
     expect(() => serverEnv({ readOnly: true, env: { 'A B': 'x' } })).toThrow(/not a valid/);
   });
+
+  it('refuses further variables that would write a secret, without naming it', () => {
+    for (const env of [
+      { GITLAB_TOKEN: 'glpat-plain' },
+      { HTTPS_PROXY: 'http://me:glpat-plain@proxy:3128' },
+    ]) {
+      expect(() => serverEnv({ readOnly: true, env })).toThrow(/reference to a variable/);
+      try {
+        serverEnv({ readOnly: true, env });
+      } catch (error) {
+        expect((error as Error).message).not.toContain('glpat-plain');
+      }
+    }
+    expect(
+      serverEnv({ readOnly: true, env: { HTTPS_PROXY: 'http://me:${PROXY_PASSWORD}@proxy:3128' } })
+        .HTTPS_PROXY,
+    ).toBe('http://me:${PROXY_PASSWORD}@proxy:3128');
+  });
 });
 
 describe('checkServers', () => {
@@ -76,16 +101,36 @@ describe('checkServers', () => {
   it('refuses secrets in plain text and entries that cannot be servers', () => {
     const { valid, problems } = checkServers({
       plain: { ...confluence, env: { ...confluence.env, CONFLUENCE_TOKEN: 'abc123secret' } },
-      header: { url: 'https://x', headers: { Authorization: 'Bearer abc' } },
+      header: { url: 'https://x', headers: { Authorization: 'Bearer abc123secret' } },
       mixed: { command: 'x', env: { API_KEY: 'pre${A}' } },
+      flag: { command: 'x', args: ['--token', 'abc123secret'] },
+      inline: { command: 'x', args: ['--api-key=abc123secret'] },
+      registry: { command: 'npx', args: ['--registry', 'https://me:abc123secret@npm.example'] },
+      query: { url: 'https://mcp.example/sse?api_key=abc123secret' },
+      proxy: { command: 'x', env: { HTTPS_PROXY: 'http://me:abc123secret@proxy:3128' } },
+      badArgs: { command: 'x', args: 'one two' },
       none: { args: [] },
       text: 'npx foo',
       'bad name': { command: 'x' },
     });
     expect(valid).toEqual({});
-    expect(problems).toHaveLength(6);
-    expect(problems[0]).toContain('"CONFLUENCE_TOKEN" looks like a secret');
+    expect(problems).toHaveLength(12);
+    expect(problems[0]).toContain('"env.CONFLUENCE_TOKEN" looks like a secret');
     expect(problems.join('\n')).not.toContain('abc123secret');
+  });
+
+  it('accepts references in flags and URLs, and harmless flags and empty values', () => {
+    const servers = {
+      flag: { command: 'x', args: ['--token', '${MY_TOKEN}', '--auth-type', 'basic'] },
+      boolean: { command: 'x', args: ['--token', '--verbose'] },
+      registry: {
+        command: 'npx',
+        args: ['--registry', 'https://${NPM_USER}:${NPM_PASS}@npm.example'],
+      },
+      query: { url: 'https://mcp.example/sse?api_key=${MCP_KEY}&region=eu' },
+      empty: { command: 'x', env: { SOME_TOKEN: '' } },
+    };
+    expect(checkServers(servers)).toEqual({ valid: servers, problems: [] });
   });
 
   it('lists the variables entries refer to', () => {
@@ -120,6 +165,8 @@ describe('mergeMcpSettings', () => {
       text: first.text,
       changed: false,
       foreign: [],
+      updated: [],
+      removed: [],
     });
   });
 
@@ -139,17 +186,70 @@ describe('mergeMcpSettings', () => {
       text: foreign,
       changed: false,
       foreign: ['gitlab'],
+      updated: [],
+      removed: [],
     });
   });
 
   it('removes own entries that are no longer wanted', () => {
     const before = JSON.stringify({ mcpServers: { confluence, other: { command: 'x' } } });
-    const { text } = mergeMcpSettings(before, {
+    const { text, removed } = mergeMcpSettings(before, {
       servers: {},
       isOwn: () => true,
-      remove: ['confluence'],
+      remove: ['confluence', 'gone'],
     });
     expect(JSON.parse(text)).toEqual({ mcpServers: { other: { command: 'x' } } });
+    expect(removed).toEqual(['confluence']);
+  });
+
+  it('removes keys it set before that the entry no longer has, and keeps the others', () => {
+    const before = JSON.stringify({
+      mcpServers: { c: { command: 'x', disabled: true, autoApprove: ['a'], note: 'mine' } },
+    });
+    const { text } = mergeMcpSettings(before, {
+      servers: { c: { command: 'x' } },
+      isOwn: () => true,
+      previousKeys: () => ['command', 'disabled', 'autoApprove'],
+    });
+    expect(JSON.parse(text)).toEqual({ mcpServers: { c: { command: 'x', note: 'mine' } } });
+  });
+
+  it('handles names that every object inherits, such as constructor', () => {
+    const { text, foreign } = mergeMcpSettings('{}', {
+      servers: { constructor: { command: 'x' }, toString: { command: 'y' } },
+      isOwn: () => false,
+    });
+    expect(foreign).toEqual([]);
+    expect(JSON.parse(text)).toEqual({
+      mcpServers: { constructor: { command: 'x' }, toString: { command: 'y' } },
+    });
+  });
+
+  it('replaces an own entry that is not an object', () => {
+    const { text } = mergeMcpSettings(JSON.stringify({ mcpServers: { c: 'oops' } }), {
+      servers: { c: { command: 'x' } },
+      isOwn: () => true,
+    });
+    expect(JSON.parse(text)).toEqual({ mcpServers: { c: { command: 'x' } } });
+  });
+
+  it('reads a file with a byte order mark, and does not rewrite it for the order of keys', () => {
+    const withBom = '\uFEFF{"mcpServers": {"c": {"env": {"B": "2", "A": "1"}, "command": "x"}}}';
+    const input = { servers: { c: { command: 'x', env: { A: '1', B: '2' } } }, isOwn: () => true };
+    expect(mergeMcpSettings(withBom, input)).toMatchObject({ changed: false, text: withBom });
+    const changed = mergeMcpSettings(withBom, { ...input, servers: { c: { command: 'y' } } });
+    expect(changed.text.startsWith('{')).toBe(true);
+    expect(JSON.parse(changed.text).mcpServers.c.command).toBe('y');
+  });
+
+  it('indents and ends lines like the file it changes', () => {
+    const tabs = '{\r\n\t"mcpServers": {\r\n\t\t"a": { "command": "x" }\r\n\t}\r\n}\r\n';
+    const { text } = mergeMcpSettings(tabs, {
+      servers: { b: { command: 'y' } },
+      isOwn: () => true,
+    });
+    expect(text).toContain('\r\n\t\t"b": {\r\n\t\t\t"command": "y"');
+    expect(text.replace(/\r\n/g, '')).not.toContain('\n');
   });
 
   it('refuses a file that is not a JSON object', () => {
@@ -240,15 +340,19 @@ describe.skipIf(process.platform === 'win32')('provisionMcpServers (scripts run 
     expect((await readdir(path.dirname(settingsFile()))).sort()).toEqual(['mcp.json']);
   });
 
-  it('removes a server it wrote once it is no longer configured', async () => {
+  it('removes a server it wrote once it is no longer configured, and says only that', async () => {
     await provisionMcpServers(
       executor,
       target(),
       setup({ servers: { confluence } }),
       new MemoryLogger(),
     );
-    await provisionMcpServers(executor, target(), setup(), new MemoryLogger());
+    const logger = new MemoryLogger();
+    await provisionMcpServers(executor, target(), setup(), logger);
     expect(Object.keys((await readSettings()).mcpServers)).toEqual(['gitlab']);
+    expect(logger.entries.map((e) => e.message)).toEqual([
+      'Removed the MCP servers confluence in the pod (~/.kiro/settings/mcp.json).',
+    ]);
   });
 
   it('copies a changed bundle again', async () => {
@@ -318,17 +422,145 @@ describe.skipIf(process.platform === 'win32')('provisionMcpServers (scripts run 
     expect(await readdir(home)).toEqual([]);
   });
 
-  it('refuses a folder that is a link, without writing through it', async () => {
-    const elsewhere = await mkdtemp(path.join(tmpdir(), 'dck-mcp-other-'));
+  it('follows links of its own user, and writes a linked mcp.json through to its target', async () => {
+    const dotfiles = await mkdtemp(path.join(tmpdir(), 'dck-mcp-dotfiles-'));
     try {
-      await mkdir(path.join(home, '.kiro-server'));
-      await symlink(elsewhere, path.join(home, '.kiro-server', 'mcp'));
-      await expect(
-        provisionMcpServers(executor, target(), setup(), new MemoryLogger()),
-      ).rejects.toThrow(/not a directory of this user/);
-      expect(await readdir(elsewhere)).toEqual([]);
+      await mkdir(path.join(dotfiles, 'kiro'));
+      await writeFile(path.join(dotfiles, 'kiro', 'mcp.json'), '{ "mcpServers": {} }\n');
+      await symlink(path.join(dotfiles, 'kiro'), path.join(home, '.kiro'));
+      await mkdir(path.join(dotfiles, 'kiro', 'settings'));
+      await symlink(
+        path.join(dotfiles, 'kiro', 'mcp.json'),
+        path.join(dotfiles, 'kiro', 'settings', 'mcp.json'),
+      );
+      await provisionMcpServers(executor, target(), setup(), new MemoryLogger());
+      expect((await lstat(settingsFile())).isSymbolicLink()).toBe(true);
+      const linked = JSON.parse(await readFile(path.join(dotfiles, 'kiro', 'mcp.json'), 'utf8'));
+      expect(Object.keys(linked.mcpServers)).toEqual(['gitlab']);
     } finally {
-      await rm(elsewhere, { recursive: true, force: true });
+      await rm(dotfiles, { recursive: true, force: true });
     }
+  });
+
+  it.skipIf(process.getuid?.() !== 0)(
+    'refuses a link to a folder of another user, without writing through it',
+    async () => {
+      const elsewhere = await mkdtemp(path.join(tmpdir(), 'dck-mcp-other-'));
+      try {
+        await chown(elsewhere, 12345, 12345);
+        await mkdir(path.join(home, '.kiro-server'));
+        await symlink(elsewhere, path.join(home, '.kiro-server', 'mcp'));
+        await expect(
+          provisionMcpServers(executor, target(), setup(), new MemoryLogger()),
+        ).rejects.toThrow(/not a directory of this user/);
+        expect(await readdir(elsewhere)).toEqual([]);
+      } finally {
+        await rm(elsewhere, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('still knows its own servers when managed.json is lost', async () => {
+    await provisionMcpServers(
+      executor,
+      target(),
+      setup({ servers: { confluence } }),
+      new MemoryLogger(),
+    );
+    await rm(path.join(home, '.kiro-server'), { recursive: true, force: true });
+    const logger = new MemoryLogger();
+    await provisionMcpServers(executor, target(), setup({ servers: { confluence } }), logger);
+    expect(logger.entries.filter((e) => e.message.includes('did not write'))).toEqual([]);
+    const managed = path.join(home, '.kiro-server', 'mcp', 'managed.json');
+    expect(Object.keys(JSON.parse(await readFile(managed, 'utf8')))).toEqual(['confluence']);
+    // and can therefore remove it later
+    await provisionMcpServers(executor, target(), setup(), new MemoryLogger());
+    expect(Object.keys((await readSettings()).mcpServers)).toEqual(['gitlab']);
+  });
+
+  it('removes a key that was dropped from the setting, and keeps one added in the pod', async () => {
+    await provisionMcpServers(
+      executor,
+      target(),
+      setup({ servers: { confluence } }),
+      new MemoryLogger(),
+    );
+    const settings = await readSettings();
+    (settings.mcpServers.confluence as Record<string, unknown>).timeout = 60000;
+    await writeFile(settingsFile(), JSON.stringify(settings));
+    const { disabled: _dropped, ...withoutDisabled } = confluence;
+    await provisionMcpServers(
+      executor,
+      target(),
+      setup({ servers: { confluence: withoutDisabled } }),
+      new MemoryLogger(),
+    );
+    expect((await readSettings()).mcpServers.confluence).toEqual({
+      ...withoutDisabled,
+      timeout: 60000,
+    });
+  });
+
+  it('removes the last server it wrote when the setting is empty', async () => {
+    const only = (servers: Record<string, unknown>): McpSetup => ({ servers });
+    await provisionMcpServers(executor, target(), only({ confluence }), new MemoryLogger());
+    const logger = new MemoryLogger();
+    expect(await provisionMcpServers(executor, target(), only({}), logger)).toBe('updated');
+    expect((await readSettings()).mcpServers).toEqual({});
+    expect(logger.entries.map((e) => e.message)).toContain(
+      'Removed the MCP servers confluence in the pod (~/.kiro/settings/mcp.json).',
+    );
+    await expect(stat(bundleFile())).rejects.toThrow();
+  });
+
+  it('sets up the other servers when the GitLab settings would write a secret', async () => {
+    const logger = new MemoryLogger();
+    const bad = setup({
+      gitlab: { bundle: 'x', config: { readOnly: true, env: { GITLAB_TOKEN: 'glpat-plain' } } },
+      servers: { confluence },
+    });
+    expect(await provisionMcpServers(executor, target(), bad, logger)).toBe('updated');
+    expect(Object.keys((await readSettings()).mcpServers)).toEqual(['confluence']);
+    await expect(stat(bundleFile())).rejects.toThrow();
+    expect(logger.entries.some((e) => e.message.includes('GITLAB_TOKEN'))).toBe(true);
+    expect(JSON.stringify(logger.entries)).not.toContain('glpat-plain');
+  });
+
+  describe('the scripts on their own', () => {
+    const run = (script: string, stdin: string) =>
+      runProcess(process.execPath, ['-e', script], { env, stdin });
+
+    it('never echo the request in an error message', async () => {
+      const result = await run(MCP_STATUS_SCRIPT, '{"settings": "supersecret-value" garbage');
+      expect(result.code).toBe(1);
+      expect(result.stderr.trim()).toBe('the request could not be read');
+    });
+
+    it('write nothing when mcp.json changed since it was read', async () => {
+      await mkdir(path.dirname(settingsFile()), { recursive: true });
+      await writeFile(settingsFile(), '{"changed": "by someone else"}');
+      const result = await run(
+        MCP_WRITE_SCRIPT,
+        JSON.stringify({
+          managedFirst: { path: '.kiro-server/mcp/managed.json', text: '{}' },
+          bundle: { path: '.kiro-server/mcp/mcp-gitlab.mjs', text: 'x' },
+          settings: { path: '.kiro/settings/mcp.json', text: '{}', expected: '{}' },
+        }),
+      );
+      expect(parseScriptAnswer(result.stdout)).toEqual({ home, settings: 'changed' });
+      expect(await readFile(settingsFile(), 'utf8')).toBe('{"changed": "by someone else"}');
+      await expect(stat(path.join(home, '.kiro-server'))).rejects.toThrow();
+    });
+
+    it('leave no temporary file behind when a write fails', async () => {
+      const folder = path.join(home, '.kiro-server', 'mcp');
+      await mkdir(path.join(folder, 'managed.json'), { recursive: true });
+      const result = await run(
+        MCP_WRITE_SCRIPT,
+        JSON.stringify({ managed: { path: '.kiro-server/mcp/managed.json', text: '{}' } }),
+      );
+      expect(result.code).toBe(1);
+      expect(await readdir(folder)).toEqual(['managed.json']);
+    });
   });
 });

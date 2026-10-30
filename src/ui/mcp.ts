@@ -59,11 +59,12 @@ export class VariableHint {
     if (this.shown.has(key) || this.state.get<boolean>(MUTED_KEY) === true) return;
     this.shown.add(key);
     const mute = "Don't Show Again";
+    const one = names.length === 1;
     void vscode.window
       .showWarningMessage(
-        `Not set in ${target}: ${names.join(', ')}. The MCP servers that use ` +
-          `${names.length === 1 ? 'it' : 'them'} do not start. Set ` +
-          `${names.length === 1 ? 'it' : 'them'} in the pod, for example from a Kubernetes secret.`,
+        `Not set in ${target}: ${names.join(', ')}. The MCP servers that need ` +
+          `${one ? 'it' : 'them'} do not work until ${one ? 'it is' : 'they are'} set in the ` +
+          'pod, for example from a Kubernetes secret.',
         mute,
       )
       .then((choice) => (choice === mute ? this.state.update(MUTED_KEY, true) : undefined));
@@ -104,9 +105,10 @@ async function gitlabSetup(
 
 /**
  * The MCP servers to set up in `target`, from the settings of this machine, or `undefined` when
- * there are none: the GitLab MCP server (unless it is switched off or there is no bundle:
+ * there is nothing to do: the GitLab MCP server (unless it is switched off or there is no bundle:
  * `dev.containers.mcpGitlab.bundlePath`, else the one a build of this extension ships in
- * `mcp/mcp-gitlab.mjs`), and the servers of `dev.containers.mcpServers`.
+ * `mcp/mcp-gitlab.mjs`), and the servers of `dev.containers.mcpServers`. That setting set to an
+ * empty object still counts, so that the servers written before are removed.
  */
 export async function mcpSetupFor(
   target: string,
@@ -116,12 +118,12 @@ export async function mcpSetupFor(
 ): Promise<McpSetup | undefined> {
   const gitlab = await gitlabSetup(extensionPath, logger);
   const servers = readSettings().mcpServers;
-  if (!gitlab && Object.keys(servers).length === 0) {
+  if (!gitlab && servers === undefined) {
     return undefined;
   }
   return {
     ...(gitlab ? { gitlab } : {}),
-    servers,
+    servers: servers ?? {},
     onMissingVariables: (names) => hint.show(target, names),
   };
 }

@@ -3,6 +3,7 @@
 
 import { createHash } from 'node:crypto';
 import { DevContainerError } from '../errors';
+import { valueProblem } from './secrets';
 
 /** The key of the entry in `mcpServers` that this extension manages. */
 export const MCP_SERVER_NAME = 'gitlab';
@@ -48,7 +49,8 @@ export function checkBundle(bundle: string): string | undefined {
 
 /**
  * The variables of the entry. The token is a reference that the IDE expands from the environment
- * of the pod when it starts the server, so its value is never written to a file.
+ * of the pod when it starts the server, so its value is never written to a file; a further
+ * variable that looks like a secret (or a URL with a password) must be a reference too.
  */
 export function serverEnv(config: McpGitlabConfig): Record<string, string> {
   const env: Record<string, string> = {};
@@ -63,6 +65,18 @@ export function serverEnv(config: McpGitlabConfig): Record<string, string> {
       throw new DevContainerError(
         'CONFIG_INVALID',
         `${TOKEN_VARIABLE} cannot be set for the GitLab MCP server; it is taken from the pod's environment.`,
+      );
+    }
+    const problem = valueProblem(
+      name,
+      value,
+      `"dev.containers.mcpGitlab.env.${name}"`,
+      `\${${name}}`,
+    );
+    if (problem) {
+      throw new DevContainerError(
+        'CONFIG_INVALID',
+        `The GitLab MCP server is not set up: ${problem}.`,
       );
     }
     env[name] = value;

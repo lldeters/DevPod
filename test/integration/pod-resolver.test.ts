@@ -344,7 +344,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         expect(settings.mcpServers.confluence).toBeDefined();
         expect(missing).toEqual(['CONFLUENCE_TOKEN', 'GITLAB_PERSONAL_ACCESS_TOKEN']);
         expect(logger.entries.map((e) => e.message)).toContain(
-          'Set up the MCP servers gitlab, confluence in the pod (~/.kiro/settings/mcp.json).',
+          'Set up the MCP servers confluence, gitlab in the pod (~/.kiro/settings/mcp.json).',
         );
       });
 

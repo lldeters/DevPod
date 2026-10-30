@@ -14,12 +14,14 @@ import { checkContainerRunning } from '../../src/core/k8s/attach';
 import { Kubectl, KubectlExecutor, kubectlExecArgs } from '../../src/core/k8s/kubectl';
 import type { PodRef } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
+import { checkMcpEndToEnd } from '../helpers/mcpEndToEnd';
 import { provisionServer } from '../../src/core/server/provisioner';
 import { BRIDGE_SCRIPT } from '../../src/core/server/script';
 import { openTunnel } from '../../src/core/tunnel';
 
 const enabled = process.env['DCK_E2E_K8S'] === '1';
 const POD = 'dck-e2e';
+const MCP_TOKEN = 'glpat-e2e-pod-secret';
 
 function kubectl(...args: string[]): string {
   return execFileSync('kubectl', args, { encoding: 'utf8' });
@@ -72,6 +74,8 @@ describe.skipIf(!enabled)('Kubernetes pod end to end', () => {
       'run',
       POD,
       '--image=mcr.microsoft.com/devcontainers/javascript-node:22',
+      // as a pod spec would set it, for example from a secret
+      `--env=GITLAB_PERSONAL_ACCESS_TOKEN=${MCP_TOKEN}`,
       '--restart=Never',
       '--command',
       '--',
@@ -216,4 +220,17 @@ describe.skipIf(!enabled)('Kubernetes pod end to end', () => {
       await tunnel.close();
     }
   }, 300_000);
+
+  it('registers MCP servers in the pod through kubectl exec, runs the bundle there and writes no token', async () => {
+    await checkMcpEndToEnd({
+      executor: new KubectlExecutor(() => ({ kubectl: 'kubectl' }), ref),
+      target: { containerId: POD, node: 'node', dataFolderName: '.k8s-e2e-mcp-server' },
+      run: (command, input) =>
+        execFileSync('kubectl', ['exec', '-i', POD, '--', ...command], {
+          encoding: 'utf8',
+          input: input ?? '',
+        }),
+      token: MCP_TOKEN,
+    });
+  }, 120_000);
 });

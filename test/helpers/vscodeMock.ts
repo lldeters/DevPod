@@ -9,6 +9,8 @@ export const state = {
   workspaceFolders: undefined as { uri: Uri; name: string; index: number }[] | undefined,
   /** User settings. */
   settings: {} as Record<string, unknown>,
+  /** User settings of the remote side in a remote window; they win over `settings`, as in the IDE. */
+  remoteSettings: {} as Record<string, unknown>,
   /** Workspace settings; they win over user settings in `get`, as in the IDE. */
   workspaceSettings: {} as Record<string, unknown>,
   registeredCommands: new Map<string, Handler>(),
@@ -22,6 +24,10 @@ export const state = {
   /** Indexes for consecutive quick picks (multi-step flows); falls back to `quickPickIndex`. */
   quickPickSequence: [] as number[],
   quickPickCalls: [] as unknown[][],
+  /** The title of every quick pick shown. */
+  quickPickTitles: [] as (string | undefined)[],
+  /** How many input boxes were shown. */
+  inputBoxCount: 0,
   resolverApiEnabled: true,
   resolvers: new Map<string, unknown>(),
   appRoot: '/nonexistent',
@@ -40,6 +46,7 @@ export const state = {
 export function reset(): void {
   state.workspaceFolders = undefined;
   state.settings = {};
+  state.remoteSettings = {};
   state.workspaceSettings = {};
   state.registeredCommands.clear();
   state.executed = [];
@@ -49,6 +56,8 @@ export function reset(): void {
   state.quickPickIndex = 0;
   state.quickPickSequence = [];
   state.quickPickCalls = [];
+  state.quickPickTitles = [];
+  state.inputBoxCount = 0;
   state.resolverApiEnabled = true;
   state.resolvers.clear();
   state.appRoot = '/nonexistent';
@@ -188,11 +197,15 @@ export const window = {
     state.errorMessages.push(message);
     return state.nextChoice;
   },
-  showQuickPick: async (items: unknown[]): Promise<unknown> => {
+  showQuickPick: async (items: unknown[], options?: { title?: string }): Promise<unknown> => {
     state.quickPickCalls.push(items);
+    state.quickPickTitles.push(options?.title);
     return items[state.quickPickSequence.shift() ?? state.quickPickIndex];
   },
-  showInputBox: async (): Promise<string | undefined> => state.inputBoxValue,
+  showInputBox: async (): Promise<string | undefined> => {
+    state.inputBoxCount++;
+    return state.inputBoxValue;
+  },
   showTextDocument: async () => undefined,
   withProgress: async <T>(
     _options: unknown,
@@ -201,19 +214,70 @@ export const window = {
     task({ report: () => undefined }, { onCancellationRequested: () => new Disposable() }),
 };
 
+type Tree = Record<string, unknown>;
+
+function isTree(value: unknown): value is Tree {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A settings layer as the IDE reads it: dotted keys become a tree, so a section can also be written
+ * as an object (`"dev.containers": { ... }`).
+ */
+function toTree(layer: Record<string, unknown>): Tree {
+  const root: Tree = {};
+  for (const [key, value] of Object.entries(layer)) {
+    const segments = key.split('.');
+    const last = segments.pop() as string;
+    let node = root;
+    for (const segment of segments) {
+      if (!isTree(node[segment])) node[segment] = {};
+      node = node[segment] as Tree;
+    }
+    node[last] = structuredClone(value);
+  }
+  return root;
+}
+
+/** Like the IDE: an object is merged into an object; any other value replaces what is there. */
+function merge(base: Tree, overlay: Tree): Tree {
+  const result: Tree = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    const current = result[key];
+    result[key] = isTree(value) && isTree(current) ? merge(current, value) : value;
+  }
+  return result;
+}
+
+function lookup(root: Tree, key: string): unknown {
+  let node: unknown = root;
+  for (const segment of key.split('.')) {
+    if (!isTree(node)) return undefined;
+    node = node[segment];
+  }
+  return node;
+}
+
 export const workspace = {
   get workspaceFolders() {
     return state.workspaceFolders;
   },
   getConfiguration: (section?: string) => {
     const full = (key: string): string => (section ? `${section}.${key}` : key);
+    const local = toTree(state.settings);
+    const remote = toTree(state.remoteSettings);
+    const workspaceLayer = toTree(state.workspaceSettings);
+    // Like the IDE: the user layer is this machine's settings with the remote side's merged in.
+    const user = merge(local, remote);
     return {
       get: <T>(key: string): T | undefined =>
-        (state.workspaceSettings[full(key)] ?? state.settings[full(key)]) as T | undefined,
+        (lookup(workspaceLayer, full(key)) ?? lookup(user, full(key))) as T | undefined,
       inspect: <T>(key: string) => ({
         key: full(key),
-        globalValue: state.settings[full(key)] as T | undefined,
-        workspaceValue: state.workspaceSettings[full(key)] as T | undefined,
+        globalValue: lookup(user, full(key)) as T | undefined,
+        globalLocalValue: lookup(local, full(key)) as T | undefined,
+        globalRemoteValue: lookup(remote, full(key)) as T | undefined,
+        workspaceValue: lookup(workspaceLayer, full(key)) as T | undefined,
       }),
       update: async (key: string, value: unknown): Promise<void> => {
         state.settings[full(key)] = value;

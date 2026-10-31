@@ -7,12 +7,11 @@ export interface TemplateVariables {
   commit: string;
   quality: string;
   version: string;
-  release: string;
   os: string;
   arch: string;
 }
 
-const KNOWN = new Set<string>(['commit', 'quality', 'version', 'release', 'os', 'arch']);
+const KNOWN = new Set<string>(['commit', 'quality', 'version', 'os', 'arch']);
 
 /**
  * Expands `${name}` placeholders. Unknown or empty placeholders are an error rather than being
@@ -43,4 +42,17 @@ export function expandUrlTemplate(template: string, variables: TemplateVariables
     );
   }
   return url;
+}
+
+/**
+ * `url` for a log or a message: without user name, password, query and fragment, which in the URL of
+ * a private mirror often carry its credentials.
+ */
+export function urlForLog(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return 'the configured address';
+  }
 }

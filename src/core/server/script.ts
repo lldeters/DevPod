@@ -3,6 +3,7 @@
 
 import { DevContainerError } from '../errors';
 import { isValidExtensionId } from '../extensionId';
+import { urlForLog } from './template';
 
 export const INSTALL_MARKER = 'devcontainers-kiro-server';
 
@@ -45,7 +46,8 @@ export interface InstallScriptParams {
  * a writable directory, else `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`). The fallback is
  * private to the user and refused (BASE stays empty) unless it is a real directory the user owns,
  * because anyone could have created that predictable name first. The platform check and the
- * install script both use it, so they agree on the folder.
+ * install script both use it, so they agree on the folder. (A home directory that others may write
+ * to, such as an emptyDir volume, is used; the install script checks the server's own folder in it.)
  */
 export const CHOOSE_BASE_SCRIPT = `
 BASE="\${HOME:-}"
@@ -77,9 +79,10 @@ const REQUIRED_SERVER_ARGS = [
  * Running it again reuses a running server. The script is meant to be piped to `sh -s`, so no
  * value ever appears on a process command line.
  *
- * Runs for the same folder are serialized with a lock directory, since two windows may connect at
- * the same time. A running server is recognized by its PID and its start time, so a PID that was
- * handed to another process after a restart is not mistaken for the server.
+ * Runs for the same folder are serialized with flock where it works, and with a lock directory that
+ * older versions of this extension use too, since two windows may connect at the same time. A
+ * running server is recognized by its PID and its start time, so a PID that was handed to another
+ * process after a restart is not mistaken for the server.
  */
 export function buildInstallScript(params: InstallScriptParams): string {
   assertSafeName(params.dataFolderName, 'server data folder name', true);
@@ -108,9 +111,15 @@ umask 077
 echo "${INSTALL_MARKER}: start"
 TMP_DIR=""
 LOCK_DIR=""
+OWNER=""
+PROBE=""
 cleanup() {
   if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi
-  if [ -n "$LOCK_DIR" ]; then rm -rf "$LOCK_DIR"; fi
+  if [ -n "$PROBE" ]; then rm -f "$PROBE"; fi
+  # Only a lock this run still holds: one that was taken over meanwhile belongs to another run.
+  if [ -n "$LOCK_DIR" ] && [ "$(cat "$LOCK_DIR/owner" 2>/dev/null || true)" = "$OWNER" ]; then
+    rm -rf "$LOCK_DIR"
+  fi
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -128,6 +137,7 @@ DATA_FOLDER=${shQuote(params.dataFolderName)}
 COMMIT=${shQuote(params.commit)}
 APP_NAME=${shQuote(params.applicationName)}
 DOWNLOAD_URL=${shQuote(params.downloadUrl)}
+DOWNLOAD_LABEL=${shQuote(urlForLog(params.downloadUrl))}
 ${CHOOSE_BASE_SCRIPT}
 [ -n "$BASE" ] || fail "no usable folder for the server: the home directory is not writable, and the fallback in the temporary directory is not a private folder of this user"
 ROOT="$BASE/$DATA_FOLDER"
@@ -139,17 +149,58 @@ TOKEN_FILE="$ROOT/server-$COMMIT.token"
 PORT_FILE="$ROOT/server-$COMMIT.port"
 
 mkdir -p "$ROOT/bin" || fail "cannot create $ROOT"
+# Where others may write to the home directory (an emptyDir volume is 0777), someone else could
+# have created this folder first, with a server of their own: it must belong to this user.
+ROOT_UID="$(stat -L -c %u "$ROOT" 2>/dev/null || true)"
+USER_UID="$(id -u 2>/dev/null || true)"
+if [ -n "$ROOT_UID" ] && [ -n "$USER_UID" ] && [ "$ROOT_UID" != "$USER_UID" ]; then
+  fail "$ROOT belongs to another user (uid $ROOT_UID); remove it or use another home directory"
+fi
 
-# One run at a time per folder: two windows may connect at once. The owner of the lock is recorded
-# so that a lock left behind by a killed run can be taken over.
+# One run at a time per folder: two windows may connect at once. Runs wait for each other with
+# flock where it works on this file system, which is tried on a file of this run first: the kernel
+# releases its lock when a run ends, however it ends. (BusyBox's flock has no -w, hence the loop
+# with -n; touch first, because dash exits when exec cannot open a file.) Descriptor 9 holds the
+# lock until the script exits; programs that may outlive a killed run are started without it.
+USE_FLOCK=""
+if command -v flock >/dev/null 2>&1 && PROBE="$(mktemp "$ROOT/flock.XXXXXX" 2>/dev/null)"; then
+  exec 8>> "$PROBE"
+  if flock -n 8 2>/dev/null; then USE_FLOCK=1; fi
+  exec 8>&-
+  rm -f "$PROBE"
+fi
+PROBE=""
 WAITED=0
+if [ -n "$USE_FLOCK" ]; then
+  touch "$ROOT/setup.flock" 2>/dev/null || fail "cannot create $ROOT/setup.flock"
+  exec 9>> "$ROOT/setup.flock"
+  until flock -n 9 2>/dev/null; do
+    [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.flock)"
+    WAITED=$((WAITED + 1))
+    sleep 1
+  done
+fi
+# Every run also takes the lock directory, which is all that runs without flock know, and older
+# versions of this extension in windows that were not reloaded. A run holds it once it has created
+# the directory and, exclusively (set -C), the owner file in it: mkdir alone is not enough, since
+# some mkdir report success when another run creates the directory at the same moment (uutils'
+# mkdir 0.0.24, for one). The owner is recorded so that a lock left behind by a killed run can be
+# taken over; a lock without one for a whole minute was left by a run killed in between, not by a
+# slow one. A lock is removed only while it still names the holder that was found gone: a holder
+# that ended normally has removed its lock itself, and the next run may hold a new one by then.
+# (Two runs that find the same stale lock can still both go on; runs that hold flock never get
+# here at the same time.)
+OWNER="$$ $(proc_start $$)"
 UNOWNED=0
-until mkdir "$ROOT/setup.lock" 2>/dev/null; do
+until mkdir "$ROOT/setup.lock" 2>/dev/null \\
+  && ( set -C; echo "$OWNER" > "$ROOT/setup.lock/owner" ) 2>/dev/null; do
   HOLDER="$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)"
   if [ -n "$HOLDER" ]; then UNOWNED=0; else UNOWNED=$((UNOWNED + 1)); fi
   # shellcheck disable=SC2086 # the owner file holds "<pid> <start time>"
-  if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 5 ]; then
-    rm -rf "$ROOT/setup.lock"
+  if { [ -n "$HOLDER" ] && ! is_running $HOLDER; } || [ "$UNOWNED" -ge 60 ]; then
+    if [ "$(cat "$ROOT/setup.lock/owner" 2>/dev/null || true)" = "$HOLDER" ]; then
+      rm -rf "$ROOT/setup.lock"
+    fi
     continue
   fi
   [ "$WAITED" -lt 600 ] || fail "another setup of the server is still running ($ROOT/setup.lock)"
@@ -157,23 +208,37 @@ until mkdir "$ROOT/setup.lock" 2>/dev/null; do
   sleep 1
 done
 LOCK_DIR="$ROOT/setup.lock"
-echo "$$ $(proc_start $$)" > "$LOCK_DIR/owner"
 
 if [ ! -f "$SERVER_DIR/.installed" ]; then
   TMP_DIR="$(mktemp -d "$ROOT/tmp.XXXXXX")" || fail "mktemp failed"
   ARCHIVE="$TMP_DIR/server.tar.gz"
   if command -v curl >/dev/null 2>&1; then
     # The archive becomes code in the container: https only (or a local file), also after redirects.
+    # 9>&-: a download left running by a killed run must not keep the setup lock.
     curl -fsSL --proto '=https,file' --proto-redir '=https' --retry 3 --connect-timeout 20 \\
-      -o "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_URL"
+      -o "$ARCHIVE" "$DOWNLOAD_URL" 9>&- || fail "download failed: $DOWNLOAD_LABEL"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$ARCHIVE" "$DOWNLOAD_URL" || fail "download failed: $DOWNLOAD_URL"
+    # wget cannot be told to stay on https after a redirect, so the response headers are kept and
+    # a redirect to anything but an https address or a path on the same server fails the download
+    # before the archive is used. (BusyBox reads any other form as an http:// address.) A wget
+    # that does not show the headers on stderr (Wget2) cannot be checked, so it is refused.
+    wget -S -O "$ARCHIVE" "$DOWNLOAD_URL" 2> "$TMP_DIR/wget.log" > /dev/null 9>&- \\
+      || fail "download failed: $DOWNLOAD_LABEL"
+    [ -n "$(sed -n '/^ *HTTP\\//p' "$TMP_DIR/wget.log")" ] \\
+      || fail "this wget does not show where it was redirected; install curl in the container"
+    sed -n 's/^ *[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]: *//p' "$TMP_DIR/wget.log" | tr -d '\\r' > "$TMP_DIR/redirects"
+    while IFS= read -r LOCATION; do
+      case "$LOCATION" in
+        [Hh][Tt][Tt][Pp][Ss]://* | /*) ;;
+        *) fail "the download was redirected to an address that is not https" ;;
+      esac
+    done < "$TMP_DIR/redirects"
   else
     fail "neither curl nor wget is installed in the container"
   fi
   command -v tar >/dev/null 2>&1 || fail "tar is not installed in the container"
   mkdir -p "$TMP_DIR/extract"
-  tar -xzf "$ARCHIVE" -C "$TMP_DIR/extract" --strip-components=${strip} || fail "extraction failed"
+  tar -xzf "$ARCHIVE" -C "$TMP_DIR/extract" --strip-components=${strip} 9>&- || fail "extraction failed"
   rm -rf "$SERVER_DIR"
   mv "$TMP_DIR/extract" "$SERVER_DIR" || fail "could not move the server into place"
   touch "$SERVER_DIR/.installed"
@@ -187,12 +252,14 @@ if [ -f "$PORT_FILE" ] && [ -f "$TOKEN_FILE" ] \\
 else
   rm -f "$PID_FILE" "$START_FILE" "$PORT_FILE" "$TOKEN_FILE" "$LOG_FILE"
   TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \\n')"
+  # A failure inside the pipeline does not stop the script (set -e only sees tr).
+  [ "\${#TOKEN}" -eq 48 ] || fail "could not create a connection token from /dev/urandom"
   printf '%s' "$TOKEN" > "$TOKEN_FILE"
   if command -v setsid >/dev/null 2>&1; then LAUNCH="setsid nohup"; else LAUNCH="nohup"; fi
   # --server-data-dir keeps the server's data (extensions, settings, state) next to it, which
   # matters when it lives in the fallback folder rather than in $HOME.
   $LAUNCH "$SERVER_DIR/bin/$APP_NAME" ${serverArgs} --server-data-dir "$ROOT" \\
-    --connection-token-file "$TOKEN_FILE" > "$LOG_FILE" 2>&1 < /dev/null &
+    --connection-token-file "$TOKEN_FILE" > "$LOG_FILE" 2>&1 < /dev/null 9>&- &
   SERVER_PID=$!
   echo "$SERVER_PID" > "$PID_FILE"
   proc_start "$SERVER_PID" > "$START_FILE"
@@ -292,7 +359,10 @@ export const BRIDGE_SCRIPT = [
   'if (!Number.isInteger(port) || port < 1 || port > 65535) process.exit(2);',
   'if (!/^[A-Za-z0-9._:-]{1,253}$/.test(host)) process.exit(2);',
   'const socket = net.connect(port, host);',
-  'process.stdin.pipe(socket);',
+  // Input is passed on only once connected. When a host has several addresses (localhost: ::1 and
+  // 127.0.0.1) and the first attempt fails, Node starts over on the next one and forgets an end()
+  // given meanwhile, so the end of the input would never reach the service.
+  "socket.on('connect', () => process.stdin.pipe(socket));",
   'socket.pipe(process.stdout);',
   // Exit only once stdout has taken everything: exiting right away drops what is still buffered,
   // which cuts off the end of a response when a slow reader is attached.

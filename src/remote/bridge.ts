@@ -26,14 +26,18 @@ export function spawnBridge(
   port: number,
   host?: string,
 ): ChildProcessByStdio<Writable, Readable, Readable> {
-  const { command, args } = target.exec.spec([
+  const { command, args, env } = target.exec.spec([
     target.nodePath,
     '-e',
     BRIDGE_SCRIPT,
     String(port),
     ...(host ? [host] : []),
   ]);
-  return spawn(command, [...args], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  return spawn(command, [...args], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+  });
 }
 
 /**

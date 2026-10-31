@@ -2,7 +2,7 @@
   "name": "devcontainers-kiro",
   "displayName": "Dev Containers for Kiro (Community)",
   "description": "Unofficial, open-source Dev Containers support for the Kiro IDE. Not affiliated with Microsoft or Amazon.",
-  "version": "0.1.0",
+  "version": "0.2.5",
   "publisher": "lldeters",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -174,19 +174,22 @@
         "dev.containers.dockerPath": {
           "type": "string",
           "default": "docker",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path or name of the container engine CLI (`docker` or `podman`)."
         },
         "dev.containers.dockerComposePath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path of the Docker Compose CLI. Leave empty to let the Dev Container CLI choose (`docker compose`, then `docker-compose`)."
         },
         "dev.containers.devcontainerCliPath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path to a `devcontainer` executable. Leave empty to use the Dev Container CLI that ships with this extension."
         },
         "dev.containers.logLevel": {
@@ -207,20 +210,52 @@
         "dev.containers.serverDownloadUrlTemplate": {
           "type": "string",
           "default": "",
-          "scope": "machine",
-          "markdownDescription": "URL template for the IDE server that is installed inside the container. Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${release}`, `${os}`, `${arch}`. Leave empty to use `serverDownloadUrlTemplate` from the IDE's `product.json`, if present."
+          "scope": "application",
+          "ignoreSync": true,
+          "markdownDescription": "URL template for the IDE server that is installed inside the container. Supported placeholders: `${commit}`, `${quality}`, `${version}`, `${os}`, `${arch}`. Leave empty to use `serverDownloadUrlTemplate` from the IDE's `product.json`, if present."
         },
         "dev.containers.kubectlPath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
+          "scope": "application",
+          "ignoreSync": true,
           "markdownDescription": "Path to the `kubectl` used to attach to Kubernetes pods. Leave empty to use the path configured for the Kubernetes extension, or `kubectl` from `PATH`."
         },
         "dev.containers.kubeconfigPath": {
           "type": "string",
           "default": "",
-          "scope": "machine",
-          "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods. Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
+          "scope": "application",
+          "ignoreSync": true,
+          "markdownDescription": "Path to the kubeconfig file used to attach to Kubernetes pods; several files are separated like in `KUBECONFIG` (`;` on Windows and for kubectl in WSL, `:` elsewhere). Leave empty to use the Kubernetes extension's setting, or `kubectl`'s own lookup (`KUBECONFIG`, `~/.kube/config`)."
+        },
+        "dev.containers.kubectlInWSL": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "ignoreSync": true,
+          "markdownDescription": "Windows only: run `kubectl` inside WSL to attach to Kubernetes pods, for kubectl, credential plugins and kubeconfigs that exist only there. `#dev.containers.kubectlPath#` is then a Linux path (empty: `kubectl` from the login shell's `PATH`), and `~` in `#dev.containers.kubeconfigPath#` is the Linux home directory. When this is not set, the Kubernetes extension's `vs-kubernetes.use-wsl` decides."
+        },
+        "dev.containers.kubectlWSLDistro": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "ignoreSync": true,
+          "markdownDescription": "The WSL distribution that runs `kubectl` with `#dev.containers.kubectlInWSL#`. Leave empty for the default distribution."
+        },
+        "dev.containers.kubectlWSLBrowser": {
+          "type": "string",
+          "enum": [
+            "windows",
+            "wsl"
+          ],
+          "enumDescriptions": [
+            "The Windows default browser, with the certificates and sign-ins of Windows.",
+            "As WSL opens them (`xdg-open`), for example a browser installed in WSL."
+          ],
+          "default": "windows",
+          "scope": "application",
+          "ignoreSync": true,
+          "markdownDescription": "With kubectl in WSL (`#dev.containers.kubectlInWSL#`): where the web pages open that kubectl's credential plugins open, such as sign-ins (for example `kubectl oidc-login` or `kubelogin`)."
         },
         "dev.containers.shareKiroLogin": {
           "type": "string",
@@ -237,6 +272,55 @@
           "default": "ask",
           "scope": "application",
           "markdownDescription": "Whether this machine's Kiro sign-in (`~/.aws/sso/cache/kiro-auth-token.json`) is copied into the containers and pods you open, so Kiro does not ask to sign in again there. By default you are asked on every connection while the container has no sign-in. An existing sign-in in the container is never replaced and nothing is copied back. **The copy is a credential in the container:** everyone who can run commands there can read it, and it shares one session with this machine, so a token refresh on one side may sign out the other. Can only be set in the user settings."
+        },
+        "dev.containers.mcpGitlab.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "Set up the GitLab MCP server (`mcp-gitlab`) in the pods you attach to and register it as `gitlab` in `~/.kiro/settings/mcp.json` there. Only takes effect when there is a bundle: `#dev.containers.mcpGitlab.bundlePath#`, or one that this build of the extension ships. The server starts only when the variable `GITLAB_PERSONAL_ACCESS_TOKEN` is set in the pod; the token is taken from there and never written to a file. When off, nothing is copied or written."
+        },
+        "dev.containers.mcpGitlab.bundlePath": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "ignoreSync": true,
+          "markdownDescription": "Absolute path on this machine of the single-file bundle of `mcp-gitlab` (`mcp-gitlab.mjs`, built with `npm run bundle`). Leave empty to use the bundle this build of the extension ships, if any."
+        },
+        "dev.containers.mcpGitlab.apiUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "`GITLAB_API_URL` for the GitLab MCP server, for example `https://gitlab.example.com/api/v4`. Leave empty for the server's default."
+        },
+        "dev.containers.mcpGitlab.readOnly": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "markdownDescription": "`GITLAB_READ_ONLY_MODE` for the GitLab MCP server: only tools that do not change anything in GitLab."
+        },
+        "dev.containers.mcpGitlab.toolsets": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "`GITLAB_TOOLSETS` for the GitLab MCP server, a comma-separated list. Leave empty for the server's default."
+        },
+        "dev.containers.mcpServers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          },
+          "default": {},
+          "scope": "application",
+          "markdownDescription": "Further MCP servers that are registered in `~/.kiro/settings/mcp.json` of the pods you attach to, in the same form as `mcpServers` there (`command`, `args`, `env`, `url`, `headers`, `disabled`, `autoApprove`, ...). Secrets are never written: a variable or header whose name looks like one (`TOKEN`, `PASSWORD`, `Authorization`, ...), the value of a flag such as `--token`, a URL parameter such as `api_key` and a password in a URL must refer to a variable of the pod, such as `\"CONFLUENCE_TOKEN\": \"${CONFLUENCE_TOKEN}\"`; Kiro expands it when it starts the server. Entries of your own in the pod with the same name are not replaced. Servers and keys removed here are removed from the pod on the next attach; to remove the last server, leave the setting as `{}`."
+        },
+        "dev.containers.mcpGitlab.env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "scope": "application",
+          "markdownDescription": "Further environment variables for the GitLab MCP server in the pod, for example `HTTPS_PROXY` or `NODE_EXTRA_CA_CERTS`. A value can refer to a variable of the pod as `${NAME}`; a variable whose name looks like a secret, and a password in a URL, must be such a reference. `GITLAB_PERSONAL_ACCESS_TOKEN` cannot be set here."
         }
       }
     }
@@ -254,7 +338,8 @@
     "vscode:prepublish": "npm run build -- --production",
     "test:e2e": "vitest run test/e2e",
     "test:smoke": "node scripts/smoke-bundle.mjs",
-    "test:e2e:k8s": "vitest run test/e2e/pod.test.ts"
+    "test:e2e:k8s": "vitest run test/e2e/pod.test.ts",
+    "test:e2e:wsl": "vitest run test/e2e/wsl.test.ts"
   },
   "dependencies": {
     "@devcontainers/cli": "0.89.0",

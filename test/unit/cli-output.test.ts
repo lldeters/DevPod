@@ -94,6 +94,30 @@ describe('secretValues and redactValues', () => {
     ]);
   });
 
+  it.each([
+    'SSH_PASSPHRASE',
+    'SESSION_COOKIE',
+    'MY_SESSION',
+    'SIGNING_JWT',
+    'BEARER',
+    'APIKEY',
+    'SIGNINGKEY',
+    'GITLABPAT',
+  ])('also takes %s for a secret', (name) => {
+    expect(secretValues({ [name]: 'value-12345678' })).toEqual(['value-12345678']);
+  });
+
+  it('leaves ordinary variables visible', () => {
+    expect(
+      secretValues({
+        HOME: '/home/someone',
+        PATH: '/usr/bin:/bin',
+        PATHEXT: '.COM;.EXE;.BAT',
+        KEYBOARD_LAYOUT: 'de-nodeadkeys',
+      }),
+    ).toEqual([]);
+  });
+
   it('replaces every occurrence, also inside a longer word', () => {
     expect(
       redactValues(

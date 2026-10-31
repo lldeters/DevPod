@@ -3,7 +3,8 @@
 Kiro installs extensions from [Open VSX](https://open-vsx.org), so that is where this extension is
 published. (The Visual Studio Marketplace does not accept extensions that use a proposed API such as
 `resolvers`, and Kiro does not use it.) Publishing is done by the
-[release workflow](../.github/workflows/release.yml) when a tag `v<version>` is pushed.
+[release workflow](../.github/workflows/release.yml) when a tag `v<version>` is created, by a push
+or by publishing a release in the GitHub UI.
 
 ## Once, before the first release
 
@@ -31,25 +32,42 @@ published. (The Visual Studio Marketplace does not accept extensions that use a 
       (_Claim namespace ownership_).
 5. **Give the workflow the token:** _Settings → Secrets and variables → Actions → New repository
    secret_, name `OVSX_PAT`, value the token.
-6. Recommended: limit who may push tags matching `v*` (_Settings → Rules → Rulesets_, target tags),
-   since pushing such a tag publishes.
+6. Recommended: limit who may create tags matching `v*`, since creating such a tag publishes.
+   _Settings → Rules → Rulesets → New ruleset → New tag ruleset_; enforcement _Active_; bypass list
+   _Repository admin_ (_Always allow_); target tags _Include by pattern_ `v*`; rules _Restrict
+   creations_, _Restrict updates_, _Restrict deletions_ and _Block force pushes_. GitHub Free
+   enforces rulesets in public repositories only.
 
 ## Every release
 
-1. Set the version (it is `0.1.0` for the first release already):
+1. Set the version:
    `npm version <x.y.z> --no-git-tag-version` (updates `package.json` and `package-lock.json`).
 2. In [CHANGELOG.md](../CHANGELOG.md), give the version a dated heading: `## <x.y.z> (YYYY-MM-DD)`.
    The workflow refuses to publish without it.
 3. Commit, and merge into `main`.
-4. Tag the commit on `main` and push the tag:
-   `git tag v<x.y.z> && git push origin v<x.y.z>`
+4. Create the tag `v<x.y.z>` on `main`, in one of two ways. Either starts the release workflow.
+   - **In the GitHub UI:** on the repository page, _Releases → Draft a new release_. Under _Choose a
+     tag_, type `v<x.y.z>` and choose _Create new tag: v<x.y.z> on publish_; _Target_ is `main`. Use
+     `<x.y.z>` as the title. Leave the description empty, and the workflow fills in the changelog
+     section (or write your own, which it keeps). Then _Publish release_. _Save draft_ creates no
+     tag and starts nothing.
+   - **On the command line:** `git tag v<x.y.z> && git push origin v<x.y.z>`
 5. Watch the _Release_ workflow in the _Actions_ tab. It checks tag, version and changelog, runs the
    whole CI including the Docker and Kubernetes end-to-end tests, publishes the VSIX that CI built
-   to Open VSX and creates a GitHub release with that VSIX and the changelog section as notes.
+   to Open VSX, and attaches that VSIX to the GitHub release (which it creates, with the changelog
+   section as notes, when the tag came from the command line). In that run the VSIX is the artifact
+   `devcontainers-kiro-vsix-release`; branch and pull request builds upload
+   `devcontainers-kiro-vsix`, which is for testing only. The name only keeps them apart and proves
+   nothing about where a VSIX came from (a pull request can change the workflow). To publish by
+   hand, take the VSIX attached to the GitHub release, or download it from the _Release_ run of the
+   tag by its run id (`gh run download <run-id> -n devcontainers-kiro-vsix-release`), never by name
+   alone.
    The listing is then at <https://open-vsx.org/extension/lldeters/devcontainers-kiro>.
 
-If a step fails after CI passed (for example a missing or expired token), fix the cause and use
-_Re-run failed jobs_; publishing skips a version Open VSX already has. A published version cannot be
+If the check of tag, version and changelog or CI fails, nothing was published: delete the tag (and a
+release published in the UI; _Releases → Tags_ has the tags), fix the cause and start again. If a
+step fails after CI passed (for example a missing or expired token), fix the cause and use _Re-run
+failed jobs_; publishing skips a version Open VSX already has. A published version cannot be
 replaced: to fix a release, publish the next version.
 
 ## By hand

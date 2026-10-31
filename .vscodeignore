@@ -9,3 +9,4 @@
 !media/icon.png
 !node_modules/@devcontainers/cli/**
 !node_modules/jsonc-parser/package.json
+!mcp/mcp-gitlab.mjs

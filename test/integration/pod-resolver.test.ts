@@ -24,8 +24,11 @@ import { encodePodAuthority } from '../../src/core/k8s/podRef';
 import type { PodRef } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
+import { PodKubectlPaths } from '../../src/remote/podKubectlPaths';
 import { PodResolver } from '../../src/remote/podResolver';
+import type { McpSetup } from '../../src/core/mcp/provision';
 import { askToShareKiroLogin } from '../../src/ui/kiroLogin';
+import { kubectlLauncher } from '../../src/ui/kubernetes';
 import { callLikeTheIde } from '../helpers/ide';
 import * as mock from '../helpers/vscodeMock';
 import { createKubectlStub, podJson } from '../helpers/kubectlStub';
@@ -124,7 +127,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       await rm(path.join(home, '.aws'), { recursive: true, force: true });
     });
 
-    function createResolver(options: { kiroLogin?: string; ask?: boolean } = {}): {
+    function createResolver(options: { kiroLogin?: string; ask?: boolean; mcp?: McpSetup } = {}): {
       resolver: PodResolver;
       logger: MemoryLogger;
     } {
@@ -132,10 +135,10 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       const resolver = new PodResolver({
         logger,
         kubectl: new Kubectl(
-          () => stub.path,
-          () => undefined,
+          () => ({ kubectl: stub.path }),
+          () => ({}),
         ),
-        kubectlPath: () => stub.path,
+        kubectlLauncher: () => ({ kubectl: stub.path }),
         targets: allKnown,
         serverBuild: async () => build,
         serverUrlTemplate: () => `file://${archive}`,
@@ -146,6 +149,7 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
                 text: options.kiroLogin,
                 ...(options.ask ? { confirm: () => askToShareKiroLogin(target) } : {}),
               },
+        mcp: async () => options.mcp,
       });
       cleanups.push(() => resolver.dispose());
       return { resolver, logger };
@@ -311,6 +315,46 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       });
     });
 
+    describe('MCP servers', () => {
+      const settingsFile = () => path.join(home, '.kiro', 'settings', 'mcp.json');
+      afterEach(async () => {
+        await rm(path.join(home, '.kiro'), { recursive: true, force: true });
+      });
+
+      it("is copied into the pod and registered with the server's Node before the IDE connects", async () => {
+        const missing: string[] = [];
+        const { resolver, logger } = createResolver({
+          mcp: {
+            gitlab: { bundle: 'console.log("mcp-gitlab");\n', config: { readOnly: true } },
+            servers: {
+              confluence: { command: 'npx', env: { CONFLUENCE_TOKEN: '${CONFLUENCE_TOKEN}' } },
+            },
+            onMissingVariables: (names) => missing.push(...names),
+          },
+        });
+        await resolver.resolve(encodePodAuthority(ref));
+
+        const bundle = path.join(home, '.pod-test-server', 'mcp', 'mcp-gitlab.mjs');
+        expect(await readFile(bundle, 'utf8')).toBe('console.log("mcp-gitlab");\n');
+        const settings = JSON.parse(await readFile(settingsFile(), 'utf8')) as {
+          mcpServers: { gitlab: { command: string; args: string[] }; confluence: unknown };
+        };
+        expect(settings.mcpServers.gitlab.args).toEqual([bundle]);
+        expect(settings.mcpServers.gitlab.command).toMatch(/\/node$/);
+        expect(settings.mcpServers.confluence).toBeDefined();
+        expect(missing).toEqual(['CONFLUENCE_TOKEN', 'GITLAB_PERSONAL_ACCESS_TOKEN']);
+        expect(logger.entries.map((e) => e.message)).toContain(
+          'Set up the MCP servers confluence, gitlab in the pod (~/.kiro/settings/mcp.json).',
+        );
+      });
+
+      it('leaves the pod alone when it is not set up', async () => {
+        const { resolver } = createResolver();
+        await resolver.resolve(encodePodAuthority(ref));
+        await expect(stat(settingsFile())).rejects.toThrow();
+      });
+    });
+
     it('refuses tunnels before the pod is attached', async () => {
       const { resolver } = createResolver();
       await expect(
@@ -341,6 +385,14 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       expect((await stub.calls()).some((args) => args.includes('exec'))).toBe(false);
     });
 
+    it('shows no link that the cluster put into an error message', async () => {
+      await stub.set('pod.json', podJson({ name: 'mypod [Retry](command:x.y)', phase: 'Pending' }));
+      const { resolver } = createResolver();
+      const error: unknown = await resolver.resolve(encodePodAuthority(ref)).catch((e) => e);
+      expect(error).toMatchObject({ kind: 'NotAvailable' });
+      expect((error as Error).message).toContain('mypod [Retry] (command:x.y) is not running');
+    });
+
     it('names the containers when the chosen one does not exist', async () => {
       await stub.set('pod.json', podJson({ containers: [{ name: 'web', running: true }] }));
       const { resolver } = createResolver();
@@ -363,10 +415,10 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       const resolver = new PodResolver({
         logger,
         kubectl: new Kubectl(
-          () => stub.path,
-          () => undefined,
+          () => ({ kubectl: stub.path }),
+          () => ({}),
         ),
-        kubectlPath: () => stub.path,
+        kubectlLauncher: () => ({ kubectl: stub.path }),
         targets: new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento),
         serverBuild: async () => build,
         serverUrlTemplate: () => `file://${archive}`,
@@ -379,6 +431,125 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       expect(state.warnings[0]?.message).toBe('Attach to the pod dev/mypod?');
       expect(state.warnings[0]?.detail).toContain('kubeconfig: /home/someone/Downloads/config');
       expect(await stub.calls()).toEqual([]);
+    });
+
+    it('names the WSL distribution when asking, and runs every kubectl call there', async () => {
+      const logger = new MemoryLogger();
+      const launched: unknown[] = [];
+      const launcher = (wsl: unknown) => {
+        launched.push(wsl);
+        return { kubectl: stub.path }; // the stub stands in for kubectl in WSL
+      };
+      const resolver = new PodResolver({
+        logger,
+        kubectl: new Kubectl(launcher, () => ({})),
+        kubectlLauncher: launcher,
+        targets: new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento),
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const wsl = { distro: 'Ubuntu-24.04' };
+      const linked = encodePodAuthority({ ...ref, wsl });
+
+      await expect(resolver.resolve(linked)).rejects.toMatchObject({ kind: 'NotAvailable' });
+      expect(state.warnings[0]?.detail).toContain('WSL distribution: Ubuntu-24.04');
+      expect(state.warnings[0]?.detail).toContain('This runs kubectl in WSL (Ubuntu-24.04)');
+      expect(launched).toEqual([]);
+
+      state.answerWarning = () => 'Open';
+      await resolver.resolve(linked);
+      expect(launched.length).toBeGreaterThanOrEqual(3); // pod query, exec target, provisioning
+      expect(launched.every((mode) => JSON.stringify(mode) === JSON.stringify(wsl))).toBe(true);
+    });
+
+    it('fixes a target without a context to the current one, also for the connection and tunnels', async () => {
+      await stub.set('current-context', 'other');
+      const { resolver, logger } = createResolver();
+      const { context: _context, ...withoutContext } = ref;
+      const resolved = (await resolver.resolve(
+        encodePodAuthority(withoutContext),
+      )) as unknown as Resolved;
+      // switching contexts later must not redirect this connection
+      await stub.set('current-context', 'changed');
+
+      const connection = (await resolved.makeConnection()) as {
+        onDidReceiveMessage: (listener: (data: Uint8Array) => void) => unknown;
+        send: (data: Uint8Array) => void;
+        end: () => void;
+      };
+      const echoed = new Promise<string>((resolve) => {
+        connection.onDidReceiveMessage((data) => resolve(Buffer.from(data).toString()));
+      });
+      connection.send(Buffer.from('pinned'));
+      expect(await echoed).toBe('pinned');
+      connection.end();
+      const remote = await startEcho();
+      const tunnel = await callLikeTheIde(resolver.tunnelFactory, {
+        remoteAddress: { host: 'localhost', port: remote },
+      });
+      const local = (tunnel.localAddress as { port: number }).port;
+      expect(await echoThrough(local, 'tunnel')).toBe('tunnel');
+      await tunnel.dispose();
+
+      const execs = (await stub.calls()).filter((args) => args.includes('exec'));
+      const bridges = execs.filter((args) => args.includes('-e'));
+      expect(bridges.length).toBeGreaterThanOrEqual(2); // the connection and the tunnel
+      expect(execs.every((args) => args.includes('--context=other'))).toBe(true);
+      expect(logger.entries.map((e) => e.message)).toContain(
+        'The target names no context; using the current one, other',
+      );
+    });
+
+    it('reads the current context with the kubeconfig and WSL selection of the window', async () => {
+      await stub.set('current-context', 'window-context');
+      const launched: unknown[] = [];
+      const launcher = (wsl: unknown) => {
+        launched.push(wsl);
+        return { kubectl: stub.path }; // the stub stands in for kubectl in WSL
+      };
+      const resolver = new PodResolver({
+        logger: new MemoryLogger(),
+        kubectl: new Kubectl(launcher, () => ({ kubeconfig: '/k/settings' })),
+        kubectlLauncher: launcher,
+        targets: allKnown,
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const { context: _context, ...withoutContext } = ref;
+      const wsl = { distro: 'Ubuntu-24.04' };
+      await resolver.resolve(
+        encodePodAuthority({ ...withoutContext, kubeconfig: '/k/window', wsl }),
+      );
+
+      const calls = await stub.calls();
+      const lookup = calls.find((args) => args.some((arg) => arg.includes('{.current-context}')));
+      expect(lookup?.[0]).toBe('--kubeconfig=/k/window');
+      expect(calls.every((args) => !args.includes('--kubeconfig=/k/settings'))).toBe(true);
+      expect(launched.every((mode) => JSON.stringify(mode) === JSON.stringify(wsl))).toBe(true);
+    });
+
+    it('refuses a target without a context when there is no current one', async () => {
+      await stub.set('contexts', 'ctx-a\nctx-b\n');
+      const { resolver } = createResolver();
+      const { context: _context, ...withoutContext } = ref;
+      await expect(resolver.resolve(encodePodAuthority(withoutContext))).rejects.toMatchObject({
+        kind: 'NotAvailable',
+        message: expect.stringMatching(/^This window names no Kubernetes context/),
+      });
+      expect((await stub.calls()).some((args) => args.includes('pod'))).toBe(false);
+    });
+
+    it('says that no kubeconfig was found for a target without a context and no contexts', async () => {
+      const { resolver } = createResolver();
+      const { context: _context, ...withoutContext } = ref;
+      await expect(resolver.resolve(encodePodAuthority(withoutContext))).rejects.toMatchObject({
+        kind: 'NotAvailable',
+        message: expect.stringMatching(/^kubectl found no Kubernetes context/),
+      });
     });
 
     it('rejects an invalid authority without calling kubectl', async () => {
@@ -394,10 +565,10 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       const resolver = new PodResolver({
         logger,
         kubectl: new Kubectl(
-          () => path.join(root, 'no-such-kubectl'),
-          () => undefined,
+          () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
+          () => ({}),
         ),
-        kubectlPath: () => path.join(root, 'no-such-kubectl'),
+        kubectlLauncher: () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
         targets: allKnown,
         serverBuild: async () => build,
         serverUrlTemplate: () => undefined,
@@ -407,6 +578,57 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
         message: expect.stringMatching(/Install kubectl or set "dev\.containers\.kubectlPath"/),
       });
       expect(state.errorMessages).toEqual([]);
+    });
+
+    it('reads the current context with the kubectl path kept for its window', async () => {
+      await stub.set('current-context', 'other');
+      const paths = new PodKubectlPaths(new mock.MockMemento() as unknown as vscode.Memento);
+      const { context: _context, ...withoutContext } = ref;
+      const authority = encodePodAuthority(withoutContext);
+      await paths.set(authority, stub.path);
+      const resolver = new PodResolver({
+        logger: new MemoryLogger(),
+        // what the listing queries use, which the connection must not
+        kubectl: new Kubectl(
+          () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
+          () => ({}),
+        ),
+        kubectlLauncher: (wsl, target) => kubectlLauncher(wsl, { remembered: paths.get(target) }),
+        targets: allKnown,
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const resolved = (await resolver.resolve(authority)) as unknown as Resolved;
+      expect(resolved.connectionToken).toMatch(/^[0-9a-f]{48}$/);
+      const execs = (await stub.calls()).filter((args) => args.includes('exec'));
+      expect(execs.length).toBeGreaterThan(0);
+      expect(execs.every((args) => args.includes('--context=other'))).toBe(true);
+    });
+
+    it('runs kubectl from the path kept for its window when no setting shows one', async () => {
+      // As in a pod window in which the Kubernetes extension runs too, which hides its kubectl path.
+      const paths = new PodKubectlPaths(new mock.MockMemento() as unknown as vscode.Memento);
+      const authority = encodePodAuthority(ref);
+      await paths.set(authority, stub.path);
+      await paths.set(encodePodAuthority({ ...ref, pod: 'other' }), path.join(root, 'no-such'));
+      const resolver = new PodResolver({
+        logger: new MemoryLogger(),
+        // what the listing queries use, which the connection must not
+        kubectl: new Kubectl(
+          () => ({ kubectl: path.join(root, 'no-such-kubectl') }),
+          () => ({}),
+        ),
+        kubectlLauncher: (wsl, target) => kubectlLauncher(wsl, { remembered: paths.get(target) }),
+        targets: allKnown,
+        serverBuild: async () => build,
+        serverUrlTemplate: () => `file://${archive}`,
+        kiroLogin: async () => undefined,
+      });
+      cleanups.push(() => resolver.dispose());
+      const resolved = (await resolver.resolve(authority)) as unknown as Resolved;
+      expect(resolved.connectionToken).toMatch(/^[0-9a-f]{48}$/);
     });
   },
 );

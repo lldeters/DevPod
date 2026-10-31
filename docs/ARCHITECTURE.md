@@ -40,10 +40,25 @@ src/ui/       Commands, status bar item, reopen prompt, setup of argv.json, logg
    download/unpack once per commit and start the server on `127.0.0.1:<random port>` with a
    token file (mode 600) and `--server-data-dir` next to it. A running server is reused; it is
    recognized by its PID **and** start time (`/proc/<pid>/stat`), so a PID that another process got
-   after a restart is not taken for it. Runs for the same folder are serialized with a lock
-   directory (`setup.lock`, owner recorded, taken over when the owner is gone), since two windows
-   may connect at once. The download must be `https` (or `file`); `curl` also refuses redirects to
-   anything but `https`.
+   after a restart is not taken for it. Runs for the same folder are serialized, since two windows
+   may connect at once: with `flock` on `setup.flock` where it works on that file system (tried on
+   a file of the run first; the kernel releases it when a run ends, however it ends; the download,
+   unpacking and the server are started without its descriptor, so they cannot keep it), and then
+   with a lock directory (`setup.lock`, owner recorded, taken over when the owner is gone), which
+   is all that runs without `flock` and older versions of the extension know. A run holds it only
+   once it has created both the directory and, exclusively (`set -C`, so `O_EXCL`), the `owner`
+   file in it: `mkdir` alone is not enough, since some `mkdir` report success when another process
+   creates the directory at the same moment (uutils' `mkdir` 0.0.24, for one; this showed up on
+   GitHub's Ubuntu 26.04 runners). A stale lock is removed only while its owner file still names
+   the holder that was found gone, so a run never removes the lock of the next holder when the
+   previous one ended normally in between. Runs that hold `flock` never wait for the directory at
+   the same time, so they cannot both take over a stale one. The download must be `https` (or `file`), also
+   after redirects: `curl` refuses others (`--proto-redir`); with `wget`, its response headers
+   (`-S`) are checked and a `Location` that is neither `https://` nor a path fails the download,
+   and a `wget` that shows no headers on stderr (Wget2) is refused. Kiro publishes no checksum or
+   signature for server archives (`docs/REVIEW-2026-10-27.md`), so there is nothing to verify the
+   archive against. Kiro publishes the server for Linux with glibc on x64 and arm64 only; a failed
+   download from its download server on Alpine or 32-bit ARM says so.
 4. **Connection**: each connection spawns `docker exec -i … <container node> -e <bridge> <port>`
    which relays stdio to the server's loopback port. No port is published on the host. The bridge
    exits only once stdout has taken everything, so the end of a stream is not cut off.
@@ -122,9 +137,13 @@ exec -i --container=... pod -- ...` for a pod.
 2. **Which pod.** VS Code passes the clicked tree node to the command. It is resolved through the
    Kubernetes extension's public API (`vscode-kubernetes-tools-api`, MIT, bundled) to namespace and
    pod name. The explorer shows pods of the _current_ context, so that context is read with
-   `kubectl config current-context` and stored in the connection. Without a click (command palette)
-   the pod is chosen step by step (context, namespace, pod); if listing namespaces is forbidden the
-   namespace is typed instead.
+   `kubectl config view --output=jsonpath={.current-context}` (empty, not an error, when there is
+   none or no kubeconfig) and stored in the connection; without a current context the attach is
+   refused with the likely cause (another kubeconfig, or on Windows another kubectl). Without a
+   click (command palette) the pod is chosen step by step (context, namespace, pod): without a
+   current context every context is offered (the only one is taken without asking), without any
+   context the message says where kubectl looked; if listing namespaces is forbidden the namespace
+   is typed instead, and any other failure to list them is reported.
 3. **Authority.** `k8s-pod+<hex(json)>` holds context, namespace, pod, container and, if one is
    configured, the kubeconfig path. Every field is validated against Kubernetes naming rules; none
    may start with a dash, and kubectl is always given `--flag=value` forms. The new window is opened
@@ -132,15 +151,76 @@ exec -i --container=... pod -- ...` for a pod.
 4. **Resolving.** An authority that "Attach to Kiro" did not open itself is confirmed first, with
    pod, container, context and kubeconfig spelled out, since the kubeconfig decides which server
    kubectl contacts and can run commands (exec credential plugins); a kubeconfig on a network share
-   is refused. `PodResolver` then asks `kubectl get pod` (with the kubeconfig _of the connection_, not
-   of the current settings) and refuses with a clear message unless the pod and container are
-   running. It then provisions the server through `kubectl exec ... -- sh -s`, as for containers,
+   is refused. A target without a context (only possible from a link) is fixed to the current
+   context of its kubeconfig for this connection, or refused when there is none, instead of
+   kubectl's fallback to `localhost:8080`. `PodResolver` then asks `kubectl get pod` (with the
+   kubeconfig _of the connection_, not of the current settings) and refuses with a clear message
+   unless the pod and container are running. It then provisions the server through `kubectl exec ... -- sh -s`, as for containers,
    and returns the connection factory.
 5. **Where the server lives.** `$HOME` if it is a writable directory, otherwise the private folder
    `devcontainers-kiro-<uid>` in `$TMPDIR` (or `/tmp`), which is used only if it is a real directory
    the user owns (then set to mode 700): anyone could have created that predictable name first,
    with a server launcher of their own. The detection script and the install script share this
-   rule (`CHOOSE_BASE_SCRIPT`). Pods often run as a user without a home directory.
+   rule (`CHOOSE_BASE_SCRIPT`). Pods often run as a user without a home directory. A home directory
+   that others may write to is used (an `emptyDir` volume is 0777), but the server's own folder in
+   it must belong to the user, or the install script stops.
+
+6. **kubectl in WSL** (Windows, `src/core/k8s/launcher.ts`). A `KubectlLauncher` says how kubectl
+   is started: directly, or with `wsl.exe` from `%SystemRoot%\System32` as
+   `wsl.exe [--distribution D] --cd ~ --exec /bin/sh -c <wrapper> kubectl <windows> <kubectl> <args...>`. `--exec` matters:
+   without it wsl.exe hands the command line to the distribution's default shell, which would
+   interpret the arguments, and the bridge passes a Node.js script as one. The fixed wrapper reads
+   `PATH` and `KUBECONFIG` from `$SHELL -l` with that shell's stdin, stdout and stderr detached (a
+   profile can neither print into the protocol nor read from it; markers separate the values from
+   any output), expands `~/` in the kubectl path, turns a leading `--kubeconfig=` (a list separated
+   by `;`) into `KUBECONFIG` with `~/` expanded and Windows drive paths converted by `wslpath`, and
+   `exec`s kubectl. Unless `<windows>` is `-` (`dev.containers.kubectlWSLBrowser: wsl`), it is
+   `%SystemRoot%`: the wrapper writes a fixed `xdg-open` shim to `~/.cache/devcontainers-kiro/bin`
+   (only when it is missing or differs), puts that folder first in `PATH` and sets `BROWSER` to it.
+   The shim hands web addresses to `rundll32.exe url.dll,FileProtocolHandler` after a `cd` into the
+   Windows folder (a Windows program started from a Linux directory can fail with "Invalid
+   argument"), and anything else to the `xdg-open` of the original `PATH`. Without `rundll32.exe`
+   or a writable folder, WSL opens web pages as before. Before that, `kubectlProcess` turns Windows paths into the distribution itself
+   (`\\wsl.localhost\<distro>\...`) into Linux paths and refuses ones into another distribution.
+   Natively, a list is passed as `KUBECONFIG` too, since `--kubeconfig` takes a single file; every
+   file of a list is validated on its own (absolute, no network share). The pod authority records the WSL selection
+   like the kubeconfig, so a window keeps it when the settings change; every kubectl call of that
+   window (query, provisioning, bridge, tunnels) goes through it.
+
+7. **MCP servers** (`src/core/mcp/`, `src/ui/mcp.ts`). After the server is provisioned and
+   before the IDE connects, two Node scripts run with the server's own Node
+   (`kubectl exec -i … <node> -e <script>`, the request as JSON on stdin, so neither the bundle nor
+   any text of the files appears in an argument list): the first reports `$HOME` (unless it is not
+   a writable directory), the SHA-256 of the GitLab bundle there, the text of
+   `~/.kiro/settings/mcp.json` and of `managed.json`, and which of the variables the entries refer
+   to (`${NAME}`) are not set (never their values). `$HOME` is the one Kiro's extension host sees:
+   the server is started from a `kubectl exec` session too, with the pod's environment.
+   - **Secrets.** Before anything runs, entries of `dev.containers.mcpServers` and
+     `dev.containers.mcpGitlab.env` are checked by name (`src/core/mcp/secrets.ts`): variables and
+     headers named like secrets (the names whose values the log masks), values of flags such as
+     `--token`, URL parameters such as `api_key`, and passwords in URLs must be references. An
+     entry that fails is skipped with a message that names the field, never the value; a problem
+     with the GitLab settings skips only the GitLab server.
+   - **Merging** happens locally with `jsonc-parser`, so comments and other keys are kept (a byte
+     order mark is dropped when the file is changed). Only own properties count, so names such as
+     `constructor` are ordinary names. An existing entry is ours if `managed.json` lists it, if it
+     is `gitlab` with our bundle as first argument, or if it already has every key and value we
+     would write (so that losing `managed.json`, for example with the server's folder, does not
+     orphan entries). Other entries belong to the user and are left alone. `managed.json` records,
+     per server, the keys we set: keys we set before that the setting no longer has are removed,
+     keys added in the pod are kept, and listed servers that are no longer configured are removed.
+     Values are compared regardless of the order of keys.
+   - **Writing.** Only if something differs, the second script writes, in this order, `managed.json`
+     with the servers and keys of before and after, the bundle, `mcp.json` and the final
+     `managed.json`, so a run that stops halfway still knows its entries. Each file goes through a
+     new file with a random name in the same folder, which is removed on any failure, and is then
+     renamed into place. Folders must be directories of the user (created 700); links of the
+     user's own to directories and files of the user's own are followed, so a `mcp.json` of a
+     dotfiles manager stays a link. `mcp.json` keeps its mode and is written only if it still has
+     the text that was read; otherwise nothing is written. Error messages of the scripts name paths
+     only; a request that cannot be read is reported without echoing it.
+   - A problem is logged and does not stop the connection. Without the GitLab bundle and without
+     `dev.containers.mcpServers` (not even `{}`), nothing runs in the pod.
 
 Limits: the pod needs `sh`, `curl` or `wget` and `tar`; `kubectl exec` streams can be cut by proxies
 or API server timeouts on long idle periods (the window then reconnects); the server and what it
@@ -195,8 +275,23 @@ which `node` the bridge uses (the server's bundled one if present, else the cont
 - Values of `-e`, `--env`, `--build-arg` and `--remote-env` in logged command lines are masked, and
   so are the values of the CLI's environment variables whose names look like secrets (at least 8
   characters), in every log line, progress message and error message from the CLI.
-- The kubectl path and kubeconfig taken over from the Kubernetes extension are read from the user
-  settings only (`inspect().globalValue`), so a workspace cannot choose a program or kubeconfig.
+- Settings that choose a program, a kubeconfig, whether kubectl runs in WSL or whether the Kiro
+  sign-in is shared have scope `application` and are read from the user's layer of `inspect()`
+  only (`userValue` in `src/ui/settings.ts`), so a workspace cannot set them. A remote window
+  takes `machine` settings from the remote side, and the IDE applies scopes only to keys it knows
+  (a section written as an object passes), so in a container or pod window a value that comes
+  from the remote side is ignored, and this machine's value comes first (the remote side could
+  also erase it, with `"dev.containers": null`). The same holds for the Kubernetes extension's
+  settings used as a fallback (`kubectl-path`, `kubeconfig`, `use-wsl`); its `kubectl-path` has
+  scope `machine`, though, so a pod window in which that extension runs too does not see the local
+  value at all. The value an attach saw is kept per authority in this machine's `globalState`
+  (`src/remote/podKubectlPaths.ts`) and used when the window sees none; it is never part of the
+  authority, which can come from a link. The settings with scope `application`
+  in a `devcontainer.json`, and the section written as an object, are reported and not written
+  into the container.
+- kubectl in WSL runs with `wsl.exe --exec`, never through the distribution's default shell; batch
+  files (`.cmd`, `.bat`) are not supported as kubectl, since starting them needs `cmd.exe` and its
+  quoting rules.
 - The connection token is generated in the container, stored with mode 600 and passed to the
   server as a file, not as an argument.
 - `argv.json` is only modified after an explicit modal confirmation.

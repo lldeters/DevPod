@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LOCAL_ONLY_SETTINGS } from '../../src/core/config/customizations';
 import { Commands } from '../../src/ui/commands';
 
 interface Menu {
@@ -83,8 +84,49 @@ describe('manifest', () => {
 
   it('declares the settings the Kubernetes feature reads', () => {
     expect(Object.keys(manifest.contributes.configuration.properties)).toEqual(
-      expect.arrayContaining(['dev.containers.kubectlPath', 'dev.containers.kubeconfigPath']),
+      expect.arrayContaining([
+        'dev.containers.kubectlPath',
+        'dev.containers.kubeconfigPath',
+        'dev.containers.kubectlInWSL',
+        'dev.containers.kubectlWSLDistro',
+      ]),
     );
+  });
+
+  it('lets only the user decide which programs and paths are used, never a workspace or container', () => {
+    // Scope `application`: only the local user settings count. With `machine`, a container or pod
+    // window would take the value from the settings on the container side.
+    const properties = manifest.contributes.configuration.properties;
+    for (const key of [
+      'dev.containers.dockerPath',
+      'dev.containers.dockerComposePath',
+      'dev.containers.devcontainerCliPath',
+      'dev.containers.serverDownloadUrlTemplate',
+      'dev.containers.kubectlPath',
+      'dev.containers.kubeconfigPath',
+      'dev.containers.kubectlInWSL',
+      'dev.containers.kubectlWSLDistro',
+    ]) {
+      // Paths of this machine: kept out of Settings Sync, as they were with scope `machine`.
+      expect(properties[key], key).toMatchObject({ scope: 'application', ignoreSync: true });
+    }
+    expect(properties['dev.containers.kubectlInWSL']).toMatchObject({
+      type: 'boolean',
+      default: false,
+    });
+  });
+
+  it('keeps from a devcontainer.json exactly the settings with scope application', () => {
+    const application = Object.entries(manifest.contributes.configuration.properties)
+      .filter(([, value]) => (value as { scope?: string }).scope === 'application')
+      .map(([key]) => key);
+    expect([...LOCAL_ONLY_SETTINGS].sort()).toEqual(application.sort());
+  });
+
+  it('has no setting with scope machine, which remote windows read from the remote side', () => {
+    for (const [key, value] of Object.entries(manifest.contributes.configuration.properties)) {
+      expect((value as { scope?: string }).scope, key).not.toBe('machine');
+    }
   });
 });
 

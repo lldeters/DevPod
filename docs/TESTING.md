@@ -2,13 +2,14 @@
 
 ## Automated
 
-| Command                    | Needs                                                 | Covers                                                                                                                     |
-| -------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `npm test`                 | Node                                                  | Unit tests: discovery, JSONC, authority, CLI args/output, server scripts (executed under `sh`), provisioner, bridge relay  |
-| `npm run test:integration` | Node, git                                             | The **real** pinned Dev Container CLI with a docker stub: flag existence, `read-configuration`, Git-root workspace path    |
-| `npm run test:smoke`       | Node, git, a build                                    | Loads the **built** `dist/extension.js` with a stand-in `vscode`, runs _Reopen in Container_ with the bundled CLI          |
-| `npm run test:e2e:k8s`     | kubectl, a throw-away cluster (kind), `DCK_E2E_K8S=1` | Real pod: attach picker queries, readiness checks, server install through `kubectl exec`, reuse, port relay out of the pod |
-| `npm run test:e2e`         | Docker, `DCK_E2E=1`                                   | Real container: `up`, lifecycle command, idempotence, server install and reuse, byte-exact bridge                          |
+| Command                    | Needs                                                 | Covers                                                                                                                                  |
+| -------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                 | Node                                                  | Unit tests: discovery, JSONC, authority, CLI args/output, server scripts (executed under `sh`), provisioner, bridge relay               |
+| `npm run test:integration` | Node, git                                             | The **real** pinned Dev Container CLI with a docker stub: flag existence, `read-configuration`, Git-root workspace path                 |
+| `npm run test:smoke`       | Node, git, a build                                    | Loads the **built** `dist/extension.js` with a stand-in `vscode`, runs _Reopen in Container_ with the bundled CLI                       |
+| `npm run test:e2e:k8s`     | kubectl, a throw-away cluster (kind), `DCK_E2E_K8S=1` | Real pod: attach picker queries, readiness checks, server install through `kubectl exec`, reuse, port relay out of the pod, MCP servers |
+| `npm run test:e2e`         | Docker, `DCK_E2E=1`                                   | Real container: `up`, lifecycle command, idempotence, server install and reuse, byte-exact bridge, MCP servers                          |
+| `npm run test:e2e:wsl`     | Windows, WSL, `DCK_E2E_WSL=1` (`DCK_WSL_DISTRO`)      | kubectl in WSL: arguments through `wsl.exe` unchanged, byte-exact stdio, `~` and `wslpath`, login `PATH`, error messages, browser shim  |
 
 CI runs all of them (`.github/workflows/ci.yml`).
 
@@ -99,6 +100,55 @@ Use `docs/ANLEITUNG-KIRO-TEST.md`, step 11, which has a ready-made pod.
       `/tmp/devcontainers-kiro-<uid>`), including installing an extension there.
 - [ ] A pod that is not running, or a missing `kubectl`, gives a clear message.
 
+### 7b. kubectl in WSL (Windows)
+
+With kubectl installed only inside WSL and `dev.containers.kubectlInWSL` set to `true`:
+
+- [ ] **Attach to Running Kubernetes Container...** lists contexts, namespaces and pods from WSL's
+      kubectl and kubeconfig, and attaching works (terminal, extension install, port forwarding).
+- [ ] **Attach to Kiro** in the Kubernetes explorer works when that extension uses
+      `vs-kubernetes.use-wsl` and `dev.containers.kubectlInWSL` is not set.
+- [ ] A kubeconfig with an exec credential plugin from `~/.krew/bin` (added to `PATH` in
+      `~/.profile`) works.
+- [ ] With `dev.containers.kubectlWSLDistro` set to a distribution that does not exist, the
+      message names it in readable text.
+- [ ] With an OIDC sign-in (`kubectl oidc-login` or `kubelogin`) whose token is not cached, the
+      sign-in page opens in the Windows default browser, the sign-in completes, and the log says
+      `(sign-ins in the Windows browser)`. With `dev.containers.kubectlWSLBrowser` set to `wsl`,
+      WSL opens it instead.
+- [ ] Turning the setting off and reloading a window that was attached in WSL still connects
+      through WSL.
+
+### 7c. MCP servers in pods
+
+First check where Kiro runs the MCP servers of a pod window, with the dummy server of this
+repository: set `dev.containers.mcpGitlab.bundlePath` to the absolute path of
+`scripts/mcp-dummy-server.mjs`, and start a pod that has the token variable:
+
+```sh
+kubectl run kiro-mcp --image=mcr.microsoft.com/devcontainers/javascript-node:22 \
+  --env=GITLAB_PERSONAL_ACCESS_TOKEN=dummy --restart=Never --command -- sleep 3600
+```
+
+- [ ] After attaching, the log says _Set up the MCP servers gitlab in the pod
+      (~/.kiro/settings/mcp.json)._, and Kiro's MCP view in the pod window shows `gitlab` as
+      connected (record what it shows if not).
+- [ ] Asking the agent to call the tool `where_am_i` of `gitlab` answers with the **pod's** host
+      name and `GITLAB_PERSONAL_ACCESS_TOKEN: set`. If it names this machine, Kiro starts the MCP
+      servers of a remote window locally, and this feature cannot work as built (record it). The
+      answer `not expanded` means that Kiro does not expand `${...}` in `env`.
+- [ ] Attaching again (reload the window) changes nothing: the log says _The MCP servers in the pod
+      (~/.kiro/settings/mcp.json) are up to date._
+- [ ] In a pod started without `GITLAB_PERSONAL_ACCESS_TOKEN`, a notification names the variable.
+- [ ] An entry `gitlab` that you wrote yourself into the pod's `mcp.json` stays as it is (log:
+      _... that this extension did not write; it was left unchanged._).
+- [ ] With `dev.containers.mcpGitlab.enabled` set to `false`, a new pod gets no `~/.kiro`.
+- [ ] With the real `mcp-gitlab` bundle and a real token in the pod, its `whoami` returns your
+      GitLab user.
+- [ ] A server in `dev.containers.mcpServers` (for example Confluence with `npx`, in a pod with
+      Node.js and npm) appears in the MCP view; a token in plain text in it is refused (log), and
+      removing the server from the setting removes it from the pod on the next attach.
+
 ### 8. Windows not opened by the extension
 
 - [ ] Opening a dev container or pod window through a link (`kiro://vscode-remote/<authority>/...`
@@ -108,8 +158,9 @@ Use `docs/ANLEITUNG-KIRO-TEST.md`, step 11, which has a ready-made pod.
 
 ## Verified results
 
-| Date       | Kiro (VS Code base) | Host                       | Engine         | Result                                                                                                                                                                                                                                                                                                                                                                                          |
-| ---------- | ------------------- | -------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-10-24 | 1.4.26 (1.131.0)    | Windows x64, Docker 29.2.0 | Docker Desktop | Image-based config: reopen, terminal, files, extension install, agent session, rebuild, reopen locally, reconnect to the running container. Server URL came from Kiro's `product.json`.                                                                                                                                                                                                         |
-| 2026-10-24 | 1.4.26 (1.131.0)    | Windows x64, Docker 29.2.0 | Docker Desktop | Build 689f2ce, `docs/ANLEITUNG-KIRO-TEST.md` step 10c all items: extensions and settings from `customizations.vscode`, `forwardPorts`, automatic port detection, `portsAttributes`; Kiro sign-in in the container window (callback on port 3128). Kubernetes pod attach (step 11) on Docker Desktop's Kubernetes: reported working by the tester (which entry point was used was not recorded). |
-| 2026-10-25 | 1.4.26 (1.131.0)    | Windows x64, Docker 29.2.0 | Docker Desktop | Build of PR #1 (review fixes), sections 2, 6b, 7 and 8 of this checklist: reported working by the tester, including asking before the sign-in is copied, pods, and the confirmation of windows the extension did not open.                                                                                                                                                                      |
+| Date       | Kiro (VS Code base) | Host                       | Engine         | Result                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------- | ------------------- | -------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-24 | 1.4.26 (1.131.0)    | Windows x64, Docker 29.2.0 | Docker Desktop | Image-based config: reopen, terminal, files, extension install, agent session, rebuild, reopen locally, reconnect to the running container. Server URL came from Kiro's `product.json`.                                                                                                                                                                                                                                         |
+| 2026-10-24 | 1.4.26 (1.131.0)    | Windows x64, Docker 29.2.0 | Docker Desktop | Build 689f2ce, `docs/ANLEITUNG-KIRO-TEST.md` step 10c all items: extensions and settings from `customizations.vscode`, `forwardPorts`, automatic port detection, `portsAttributes`; Kiro sign-in in the container window (callback on port 3128). Kubernetes pod attach (step 11) on Docker Desktop's Kubernetes: reported working by the tester (which entry point was used was not recorded).                                 |
+| 2026-10-25 | 1.4.26 (1.131.0)    | Windows x64, Docker 29.2.0 | Docker Desktop | Build of PR #1 (review fixes), sections 2, 6b, 7 and 8 of this checklist: reported working by the tester, including asking before the sign-in is copied, pods, and the confirmation of windows the extension did not open.                                                                                                                                                                                                      |
+| 2026-10-27 | 1.4.26 (1.131.0)    | Windows x64                | k3s in WSL     | Build ccbddfd, section 7b: attaching through the command palette to a pod of a k3s cluster in Ubuntu 24.04 (WSL) with `dev.containers.kubectlPath` set to a Linux path: refused without `kubectlInWSL`, works with it (log: `kubectl in WSL (Ubuntu-24.04)`). Without the WSL settings, the Windows kubectl also reached that cluster, because WSL forwards the k3s API port to Windows and a Windows kubeconfig pointed to it. |

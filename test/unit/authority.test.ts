@@ -89,6 +89,8 @@ describe('authority', () => {
     ['a right-to-left override', '/home/me/\u202Eexe.nigol\u202C/projects'],
     ['an isolate', '/home/me/\u2067x\u2069'],
     ['a direction mark', '/home/me/\u200Fx'],
+    ['a line separator', '/tmp/x\u2028safe'],
+    ['a paragraph separator', '/tmp/x\u2029safe'],
   ])('rejects a path with %s, which could disguise the confirmation dialog', (_name, hostPath) => {
     expect(() => decodeAuthority(hex({ v: 1, hostPath }))).toThrowError(/invalid folder path/);
     expect(() => decodeAuthority(hex({ v: 1, hostPath: '/x', configFile: hostPath }))).toThrowError(

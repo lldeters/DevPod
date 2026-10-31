@@ -9,11 +9,12 @@ import type { Kubectl } from '../core/k8s/kubectl';
 import { discoverConfigs } from '../core/config/discovery';
 import { resolveAndValidateConfig } from '../core/config/validate';
 import type { DiscoveredConfig } from '../core/config/discovery';
-import { errorMessage } from '../core/errors';
+import { errorMessage, notificationText } from '../core/errors';
 import type { KnownTargets } from '../remote/knownTargets';
+import type { PodKubectlPaths } from '../remote/podKubectlPaths';
 import type { RebuildRequests } from '../remote/rebuildRequests';
 import { showDiagnostics } from './diagnostics';
-import { attachToPod, resolveExplorerTarget } from './kubernetes';
+import { attachToPod, resolveExplorerTarget, wslSetting } from './kubernetes';
 import type { ExplorerTarget } from './kubernetes';
 import type { OutputLogger } from './logging';
 import { currentAuthority, localWorkspaceFolder } from './remoteState';
@@ -47,6 +48,8 @@ export interface CommandServices {
   targets: Pick<KnownTargets, 'add'>;
   remoteSupport: RemoteSupport;
   kubectl: Kubectl;
+  /** Keeps the Kubernetes extension's kubectl path for the pod windows these commands open. */
+  kubectlPaths: Pick<PodKubectlPaths, 'set'>;
   /** Replaceable in tests; by default the Kubernetes extension's API is used. */
   resolveExplorerTarget?: (target: unknown) => Promise<ExplorerTarget | undefined>;
 }
@@ -84,7 +87,10 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
       } catch (error) {
         logger.log('error', errorMessage(error));
         const open = 'Show Log';
-        const choice = await vscode.window.showErrorMessage(errorMessage(error), open);
+        const choice = await vscode.window.showErrorMessage(
+          notificationText(errorMessage(error)),
+          open,
+        );
         if (choice === open) {
           logger.show();
         }
@@ -232,8 +238,10 @@ export function registerCommands(services: CommandServices): vscode.Disposable[]
     logger,
     kubectl: services.kubectl,
     targets: services.targets,
+    kubectlPaths: services.kubectlPaths,
     ensureRemoteSupport,
     resolveTarget: services.resolveExplorerTarget ?? resolveExplorerTarget,
+    wslSetting: () => wslSetting(),
   };
 
   const showPodMenu = async (): Promise<void> => {

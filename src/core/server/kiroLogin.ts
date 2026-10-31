@@ -61,13 +61,18 @@ export async function readLocalLoginFile(
   return text;
 }
 
+/** Prints `nohome` and stops unless `$HOME` is a writable directory. */
+const HOME_CHECK =
+  'if [ -z "${HOME:-}" ] || [ ! -d "$HOME" ] || [ ! -w "$HOME" ]; then echo nohome; exit 0; fi';
+
 /**
  * Writes `text` below the home directory of the container user unless a non-empty file is already
  * there, and prints `copied`, `exists` or `nohome`. The user's real `$HOME` is used (not the
- * fallback directory the server may live in), and without a writable one nothing is written. The
- * content goes through a quoted here-document on stdin, so the shell never interprets it and it
- * does not appear in a process list. Folders and file are private to the user (700/600), like the
- * ones Kiro creates itself.
+ * fallback directory the server may live in), and without a writable one nothing is written. The content goes through a quoted here-document on stdin, so the shell never interprets
+ * it and it does not appear in a process list. It is written to a new file with an unpredictable
+ * name, so nothing already there (a file or a link) is written through, which is then renamed into
+ * place. Folders and file are private to the user (700/600), like the ones Kiro creates itself, so
+ * no one else can read the copy, also in a home directory others may write to.
  */
 export function buildShareLoginScript(text: string): string {
   const delimiter = `DCK_${randomBytes(12).toString('hex')}`;
@@ -81,14 +86,17 @@ export function buildShareLoginScript(text: string): string {
   return [
     'set -eu',
     'umask 077',
-    'if [ -z "${HOME:-}" ] || [ ! -d "$HOME" ] || [ ! -w "$HOME" ]; then echo nohome; exit 0; fi',
+    HOME_CHECK,
     `FILE="$HOME/${KIRO_LOGIN_RELATIVE_PATH}"`,
     'if [ -s "$FILE" ]; then echo exists; exit 0; fi',
     'mkdir -p "$(dirname "$FILE")"',
-    `cat > "$FILE.tmp" <<'${delimiter}'`,
+    'TMP=""',
+    `trap 'if [ -n "$TMP" ]; then rm -f "$TMP"; fi' EXIT`,
+    'TMP="$(mktemp "$FILE.XXXXXX")"',
+    `cat > "$TMP" <<'${delimiter}'`,
     `${body}${delimiter}`,
-    'chmod 600 "$FILE.tmp"',
-    'mv "$FILE.tmp" "$FILE"',
+    'chmod 600 "$TMP"',
+    'mv "$TMP" "$FILE"',
     'echo copied',
     '',
   ].join('\n');
@@ -112,7 +120,7 @@ export function parseShareLoginResult(stdout: string): 'copied' | 'exists' | 'no
  */
 export function buildLoginStatusScript(): string {
   return [
-    'if [ -z "${HOME:-}" ] || [ ! -d "$HOME" ] || [ ! -w "$HOME" ]; then echo nohome; exit 0; fi',
+    HOME_CHECK,
     `if [ -s "$HOME/${KIRO_LOGIN_RELATIVE_PATH}" ]; then echo exists; else echo missing; fi`,
     '',
   ].join('\n');

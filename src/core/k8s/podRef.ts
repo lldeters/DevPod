@@ -4,6 +4,8 @@
 import * as path from 'node:path';
 import { hasUnsafeCharacters, isNetworkPath } from '../authority';
 import { DevContainerError } from '../errors';
+import { WSL_KUBECONFIG_SEPARATOR, isValidWslDistro, kubeconfigFiles, wslPathOf } from './launcher';
+import type { WslSelection } from './launcher';
 
 /** Remote authority prefix for Kubernetes pods: `k8s-pod+<hex>`. */
 export const POD_AUTHORITY_PREFIX = 'k8s-pod';
@@ -15,8 +17,13 @@ export interface PodRef {
   readonly namespace: string;
   readonly pod: string;
   readonly container: string;
-  /** Absolute path of a kubeconfig file; kubectl's own lookup (KUBECONFIG) applies if absent. */
+  /**
+   * Absolute path of a kubeconfig file; kubectl's own lookup (KUBECONFIG) applies if absent. In
+   * WSL it may also start with `~/` (the Linux home directory).
+   */
   readonly kubeconfig?: string;
+  /** kubectl runs in WSL (Windows only). Fixed at attach time, like the kubeconfig. */
+  readonly wsl?: WslSelection;
 }
 
 // Kubernetes object names are DNS-1123 subdomains; container names are DNS-1123 labels.
@@ -32,25 +39,49 @@ function fail(what: string): never {
  * Checks every field. These values end up as kubectl arguments, so none may start with a dash or
  * contain anything but the characters Kubernetes itself allows.
  */
-export function assertPodRef(ref: PodRef): void {
+export function assertPodRef(ref: PodRef, delimiter: string = path.delimiter): void {
   if (ref.namespace.length > 63 || !DNS_NAME.test(ref.namespace)) fail('namespace');
   if (ref.pod.length > 253 || !DNS_NAME.test(ref.pod)) fail('pod name');
   if (ref.container.length > 63 || !DNS_NAME.test(ref.container)) fail('container name');
   if (ref.context !== undefined && (ref.context.length > 253 || !CONTEXT_NAME.test(ref.context))) {
     fail('context');
   }
-  if (
-    ref.kubeconfig !== undefined &&
-    (hasUnsafeCharacters(ref.kubeconfig) ||
-      !(path.posix.isAbsolute(ref.kubeconfig) || path.win32.isAbsolute(ref.kubeconfig)))
-  ) {
-    fail('kubeconfig path');
+  if (ref.wsl?.distro !== undefined && !isValidWslDistro(ref.wsl.distro)) {
+    fail('WSL distribution');
   }
-  // A kubeconfig decides which server kubectl talks to and can run commands (exec credential
-  // plugins), and reading one from a share already contacts that host.
-  if (ref.kubeconfig !== undefined && isNetworkPath(ref.kubeconfig)) {
-    fail('kubeconfig path (network shares are not supported)');
+  if (ref.kubeconfig !== undefined) {
+    // Several files are each checked, split as kubectl will split them: by ";" in WSL, else like
+    // KUBECONFIG on this machine.
+    const files = kubeconfigFiles(ref.kubeconfig, ref.wsl ? WSL_KUBECONFIG_SEPARATOR : delimiter);
+    if (
+      files.length === 0 ||
+      hasUnsafeCharacters(ref.kubeconfig) ||
+      !files.every((file) => isKubeconfigPath(file, ref.wsl))
+    ) {
+      fail('kubeconfig path');
+    }
+    // A kubeconfig decides which server kubectl talks to and can run commands (exec credential
+    // plugins), and reading one from a share already contacts that host.
+    if (files.some(isNetworkPath)) {
+      fail('kubeconfig path (network shares are not supported)');
+    }
   }
+}
+
+/**
+ * An absolute path. In WSL also `~/...`, and only a Linux path, a Windows path with a drive letter
+ * or a Windows path into a distribution (`\\wsl.localhost\...`): the forms kubectl in WSL can use.
+ */
+function isKubeconfigPath(file: string, wsl: WslSelection | undefined): boolean {
+  if (wsl) {
+    return (
+      path.posix.isAbsolute(file) ||
+      file.startsWith('~/') ||
+      /^[A-Za-z]:[\\/]/.test(file) ||
+      wslPathOf(file) !== undefined
+    );
+  }
+  return path.posix.isAbsolute(file) || path.win32.isAbsolute(file);
 }
 
 export function isPodAuthority(authority: string | undefined): authority is string {
@@ -70,6 +101,9 @@ export function encodePodAuthority(ref: PodRef): string {
     container: ref.container,
     ...(ref.context === undefined ? {} : { context: ref.context }),
     ...(ref.kubeconfig === undefined ? {} : { kubeconfig: ref.kubeconfig }),
+    ...(ref.wsl === undefined
+      ? {}
+      : { wsl: ref.wsl.distro === undefined ? {} : { distro: ref.wsl.distro } }),
   };
   return `${POD_AUTHORITY_PREFIX}+${Buffer.from(JSON.stringify(payload), 'utf8').toString('hex')}`;
 }
@@ -107,13 +141,22 @@ export function decodePodAuthority(authority: string): PodRef {
   }
   const context = text(record, 'context', false);
   const kubeconfig = text(record, 'kubeconfig', false);
+  const wsl = wslSelection(record['wsl']);
   const ref: PodRef = {
     namespace: text(record, 'namespace', true) as string,
     pod: text(record, 'pod', true) as string,
     container: text(record, 'container', true) as string,
     ...(context === undefined ? {} : { context }),
     ...(kubeconfig === undefined ? {} : { kubeconfig }),
+    ...(wsl === undefined ? {} : { wsl }),
   };
   assertPodRef(ref);
   return ref;
+}
+
+function wslSelection(value: unknown): WslSelection | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('WSL selection');
+  const distro = text(value as Record<string, unknown>, 'distro', false);
+  return distro === undefined ? {} : { distro };
 }

@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import * as net from 'node:net';
+import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemoryLogger } from '../../src/core/logger';
 import { BRIDGE_SCRIPT } from '../../src/core/server/script';
 import { normalizeRemoteHost, openTunnel } from '../../src/core/tunnel';
-import type { OpenTunnel } from '../../src/core/tunnel';
+import type { BridgeSpawner, OpenTunnel } from '../../src/core/tunnel';
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -202,6 +204,98 @@ describe('openTunnel', () => {
     const refused = refusals();
     expect(refused.map((entry) => entry.level)).toEqual(['info', 'debug']);
     expect(refused[0]?.message).toContain(`localhost:${dead}`);
+  });
+
+  it('delivers the whole response to a slow reader when the bridge exits', async () => {
+    // A bridge that hands over its whole output at once and exits right after it, so most of the
+    // response is still buffered in the tunnel when the exit is reported.
+    const payload = Buffer.alloc(16 * 1024 * 1024, 7);
+    const bridge = (() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: () => true,
+      });
+      child.stdout.on('end', () => setImmediate(() => child.emit('close', 0, null)));
+      child.stdout.end(payload);
+      return child;
+    }) as unknown as BridgeSpawner;
+    const tunnel = await openTunnel(
+      bridge,
+      { host: 'localhost', port: 1 },
+      undefined,
+      new MemoryLogger(),
+    );
+    cleanups.push(() => tunnel.close());
+    const received = await new Promise<number>((resolve, reject) => {
+      const socket = net.connect(tunnel.local.port, '127.0.0.1');
+      let length = 0;
+      socket.on('data', (chunk: Buffer) => {
+        length += chunk.length;
+        socket.pause();
+        setTimeout(() => socket.resume(), 1);
+      });
+      socket.on('close', () => resolve(length));
+      socket.on('error', reject);
+    });
+    expect(received).toBe(payload.length);
+  });
+
+  it('lets go of a connection after the relay ended, also when the client sent more', async () => {
+    // The service answers and closes; the client sends once more before it closes too, as a pool
+    // reusing a connection the service has already dropped does.
+    const remote = await new Promise<number>((resolve) => {
+      const server = net.createServer((socket) => socket.end('bye'));
+      cleanups.push(() => new Promise<void>((done) => server.close(() => done())));
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
+    });
+    const tunnel = await open(remote);
+    await new Promise<void>((resolve, reject) => {
+      const socket = net.connect({
+        port: tunnel.local.port,
+        host: '127.0.0.1',
+        allowHalfOpen: true,
+      });
+      socket.on('error', reject);
+      socket.on('end', () => socket.end('more'));
+      socket.on('close', () => resolve());
+      socket.resume();
+    });
+    for (let waited = 0; tunnel.connections() > 0 && waited < 5000; waited += 10) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(tunnel.connections()).toBe(0);
+  });
+
+  it('answers a client that ends its side right after the request', async () => {
+    const remote = await new Promise<number>((resolve) => {
+      // Replies once the request is complete, like a service that reads until the end of input.
+      const server = net.createServer({ allowHalfOpen: true }, (socket) => {
+        const chunks: Buffer[] = [];
+        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+        socket.on('end', () => socket.end(Buffer.concat(chunks)));
+      });
+      cleanups.push(() => new Promise<void>((done) => server.close(() => done())));
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
+    });
+    const tunnel = await open(remote);
+    const answer = await new Promise<string>((resolve, reject) => {
+      const socket = net.connect({
+        port: tunnel.local.port,
+        host: '127.0.0.1',
+        allowHalfOpen: true,
+      });
+      const chunks: Buffer[] = [];
+      socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+      socket.on('end', () => {
+        socket.end();
+        resolve(Buffer.concat(chunks).toString('utf8'));
+      });
+      socket.on('error', reject);
+      socket.on('connect', () => socket.end('hello'));
+    });
+    expect(answer).toBe('hello');
   });
 
   it('close() stops the listener and ends open connections', async () => {

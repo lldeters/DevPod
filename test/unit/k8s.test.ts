@@ -26,8 +26,10 @@ describe('pod authority', () => {
     expect(decodePodAuthority(encodePodAuthority(ref))).toEqual(ref);
     const minimal: PodRef = { namespace: 'default', pod: 'p', container: 'c' };
     expect(decodePodAuthority(encodePodAuthority(minimal))).toEqual(minimal);
-    const withConfig: PodRef = { ...ref, kubeconfig: 'C:\\Users\\me\\.kube\\config' };
+    const withConfig: PodRef = { ...ref, kubeconfig: '/home/me/.kube/config' };
     expect(decodePodAuthority(encodePodAuthority(withConfig))).toEqual(withConfig);
+    const inWsl: PodRef = { ...ref, wsl: {}, kubeconfig: 'C:\\Users\\me\\.kube\\config' };
+    expect(decodePodAuthority(encodePodAuthority(inWsl))).toEqual(inWsl);
   });
 
   it('only contains characters that are safe in a URI authority', () => {
@@ -41,6 +43,12 @@ describe('pod authority', () => {
       ),
     ).toThrowError(/kubeconfig path/);
     expect(() => assertPodRef({ ...ref, kubeconfig: '/home/me/\u202Egifnoc' })).toThrow();
+    // Also the Unicode line and paragraph separators, also in one file of a list.
+    for (const separator of ['\u2028', '\u2029']) {
+      expect(() =>
+        assertPodRef({ ...ref, kubeconfig: `/a/config:/tmp/k${separator}Context-prod` }, ':'),
+      ).toThrow(/kubeconfig path/);
+    }
   });
 
   it('rejects a kubeconfig on a network share, but not one in WSL', () => {
@@ -137,13 +145,13 @@ describe('kubectl arguments', () => {
 
   it('refuses to build arguments for an invalid target', () => {
     expect(() => kubectlExecArgs({ ...ref, pod: '--all' }, ['sh'])).toThrow();
-    expect(() => new KubectlTarget('kubectl', { ...ref, container: '-x' })).toThrow();
+    expect(() => new KubectlTarget({ kubectl: 'kubectl' }, { ...ref, container: '-x' })).toThrow();
   });
 });
 
 describe('exec targets', () => {
   it('describes a pod container for logs and runs kubectl', () => {
-    const target = new KubectlTarget('/usr/bin/kubectl', ref);
+    const target = new KubectlTarget({ kubectl: '/usr/bin/kubectl' }, ref);
     expect(target.label).toBe('team-a/web-7d9f/app');
     expect(target.spec(['id'])).toEqual({
       command: '/usr/bin/kubectl',
@@ -204,6 +212,13 @@ describe('parsePodInfo', () => {
     expect(info.containers).toEqual([{ name: 'a', ready: false, running: false }]);
     expect(info.phase).toBe('Pending');
   });
+
+  it.each([['Evicted [x](command:y)'], [42], [undefined]])(
+    'takes a phase that is not one of the pod phases as Unknown (%j)',
+    (phase) => {
+      expect(parsePodInfo(podJson({ status: { phase } })).phase).toBe('Unknown');
+    },
+  );
 
   it.each(['', 'not json', '{}', '{"metadata":{}}'])('rejects %j', (input) => {
     expect(() => parsePodInfo(input)).toThrow();

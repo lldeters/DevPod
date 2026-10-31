@@ -33,6 +33,43 @@ export interface IdeCustomizations {
   settings: Record<string, unknown>;
   /** Entries that are not plain extension ids (for example with a version); reported, not used. */
   rejectedExtensions: string[];
+  /**
+   * Settings of this extension that decide what runs on this machine (scope `application`). They
+   * count only in the local user settings, so they are reported instead of being written into the
+   * container; so is the section written as an object, which could hold them.
+   */
+  ignoredSettings: string[];
+}
+
+/** This extension's settings with scope `application` (test/unit/manifest.test.ts checks the list). */
+export const LOCAL_ONLY_SETTINGS: readonly string[] = [
+  'dockerPath',
+  'dockerComposePath',
+  'devcontainerCliPath',
+  'serverDownloadUrlTemplate',
+  'kubectlPath',
+  'kubeconfigPath',
+  'kubectlInWSL',
+  'kubectlWSLDistro',
+  'kubectlWSLBrowser',
+  'shareKiroLogin',
+  'mcpGitlab.enabled',
+  'mcpGitlab.bundlePath',
+  'mcpGitlab.apiUrl',
+  'mcpGitlab.readOnly',
+  'mcpGitlab.toolsets',
+  'mcpGitlab.env',
+  'mcpServers',
+].map((name) => `dev.containers.${name}`);
+
+/** A key that sets one of them, also as part of a section object (`"dev.containers": { ... }`). */
+function isLocalOnlySetting(key: string): boolean {
+  return (
+    key === 'dev' ||
+    key === 'dev.containers' ||
+    key === 'dev.containers.mcpGitlab' ||
+    LOCAL_ONLY_SETTINGS.includes(key)
+  );
 }
 
 /**
@@ -45,6 +82,7 @@ export function extractCustomizations(config: Record<string, unknown>): IdeCusto
 
   const extensions: string[] = [];
   const rejectedExtensions: string[] = [];
+  const ignoredSettings: string[] = [];
   const seen = new Set<string>();
   const settings: Record<string, unknown> = {};
 
@@ -62,10 +100,16 @@ export function extractCustomizations(config: Record<string, unknown>): IdeCusto
       }
     }
     if (isRecord(source['settings'])) {
-      Object.assign(settings, source['settings']);
+      for (const [key, value] of Object.entries(source['settings'])) {
+        if (!isLocalOnlySetting(key)) {
+          settings[key] = value;
+        } else if (!ignoredSettings.includes(key)) {
+          ignoredSettings.push(key);
+        }
+      }
     }
   }
-  return { extensions, settings, rejectedExtensions };
+  return { extensions, settings, rejectedExtensions, ignoredSettings };
 }
 
 /** A port to forward, as host and port inside the container's network. */

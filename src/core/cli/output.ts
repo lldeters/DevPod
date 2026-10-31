@@ -46,7 +46,12 @@ export function redactEnvValues(text: string): string {
 // wherever devcontainer.json uses ${localEnv:...}, for example in a lifecycle command, which the CLI
 // logs at debug level.
 const SECRET_NAME =
-  /token|secret|passw(or)?d|credential|auth|private_?key|api_?key|access_?key|(^|_)(key|pat)$/i;
+  /token|secret|passw(or)?d|passphrase|credential|auth|cookie|session|jwt|bearer|private_?key|api_?key|access_?key|(key|pat)$/i;
+/** Whether a variable or header called `name` usually holds a secret. */
+export function looksLikeSecretName(name: string): boolean {
+  return SECRET_NAME.test(name);
+}
+
 // Shorter values would also hide ordinary words and numbers in the log.
 const MIN_SECRET_LENGTH = 8;
 

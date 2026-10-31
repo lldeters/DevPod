@@ -4,13 +4,17 @@
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { errorMessage } from '../core/errors';
+import { DevContainerError, errorMessage, notificationText } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
-import type { Kubectl, PodInfo } from '../core/k8s/kubectl';
+import { noContextError, noCurrentContextError } from '../core/k8s/kubectl';
+import type { Kubectl, KubectlScope, PodInfo } from '../core/k8s/kubectl';
+import { isValidWslDistro, kubeconfigFiles, windowsRoot } from '../core/k8s/launcher';
+import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { encodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
 import type { KnownTargets } from '../remote/knownTargets';
-import { readSettings } from './settings';
+import type { PodKubectlPaths } from '../remote/podKubectlPaths';
+import { readSettings, userValue } from './settings';
 
 /** What a right-click in the Kubernetes explorer pointed at. */
 export type ExplorerTarget =
@@ -48,45 +52,130 @@ export function expandHome(file: string): string {
   return file === '~' || /^~[\\/]/.test(file) ? path.join(homedir(), file.slice(1)) : file;
 }
 
-/**
- * A setting of the Kubernetes extension as the user set it. Those settings can also come from a
- * workspace, but a program to run, or a kubeconfig (which decides the server and can run commands),
- * must not: this extension's own path settings have scope `machine` for the same reason.
- */
-function userValue<T>(section: string | undefined, key: string): T | undefined {
-  return vscode.workspace.getConfiguration(section).inspect<T>(key)?.globalValue;
+/** The kubectl path the Kubernetes extension is configured with in the user settings, per OS first. */
+export function kubernetesKubectlPath(): string | undefined {
+  const os =
+    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
+  return (
+    nonEmpty(userValue('vscode-kubernetes', `kubectl-path-${os}`)) ??
+    nonEmpty(userValue('vscode-kubernetes', 'kubectl-path'))
+  );
 }
 
 /**
- * The kubectl binary: this extension's setting, else the one the Kubernetes extension is
- * configured with in the user settings (per OS, then general), else `kubectl` from PATH.
+ * The kubectl binary: this extension's setting, else the Kubernetes extension's, else `remembered`,
+ * else `kubectl` from PATH. `remembered` is the Kubernetes extension's path that a pod window was
+ * attached with: that setting has scope `machine`, so the IDE hides it in a pod window in which the
+ * Kubernetes extension runs too.
  */
-export function effectiveKubectlPath(): string {
+export function effectiveKubectlPath(remembered?: string): string {
   const own = readSettings().kubectlPath;
   if (own) {
     return expandHome(own);
   }
-  const os =
-    process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux';
-  const configured =
-    nonEmpty(userValue('vscode-kubernetes', `kubectl-path-${os}`)) ??
-    nonEmpty(userValue('vscode-kubernetes', 'kubectl-path'));
+  const configured = kubernetesKubectlPath() ?? remembered;
   return configured ? expandHome(configured) : 'kubectl';
 }
 
 /**
  * The kubeconfig file: this extension's setting, else the Kubernetes extension's from the user
- * settings, else kubectl's own lookup.
+ * settings, else kubectl's own lookup. In WSL, `~` is the Linux home directory, which kubectl's
+ * wrapper expands there.
  */
-export function effectiveKubeconfig(): string | undefined {
-  const own = readSettings().kubeconfigPath;
-  if (own) {
-    return expandHome(own);
-  }
+export function effectiveKubeconfig(wsl?: WslSelection): string | undefined {
   // The Kubernetes extension keeps its settings as an object with dotted keys.
-  const settings = userValue<Record<string, unknown>>(undefined, 'vs-kubernetes');
-  const configured = nonEmpty(settings?.['vs-kubernetes.kubeconfig']);
-  return configured === undefined ? undefined : expandHome(configured);
+  const configured =
+    readSettings().kubeconfigPath ??
+    nonEmpty(
+      userValue<Record<string, unknown>>(undefined, 'vs-kubernetes')?.['vs-kubernetes.kubeconfig'],
+    );
+  if (configured === undefined) return undefined;
+  // Several files are separated like KUBECONFIG: by ";" on Windows, ":" elsewhere.
+  return wsl
+    ? configured
+    : kubeconfigFiles(configured, path.delimiter).map(expandHome).join(path.delimiter);
+}
+
+/**
+ * Whether kubectl runs in WSL: Windows only, by this extension's user setting, else by the
+ * Kubernetes extension's `use-wsl`, so that "Attach to Kiro" uses the kubectl of its explorer.
+ */
+export function effectiveWsl(
+  platform: NodeJS.Platform = process.platform,
+): WslSelection | undefined {
+  if (wslSetting(platform) === undefined) return undefined;
+  const distro = readSettings().kubectlWSLDistro;
+  if (distro !== undefined && !isValidWslDistro(distro)) {
+    throw new DevContainerError(
+      'CONFIG_INVALID',
+      `"dev.containers.kubectlWSLDistro" is not a valid WSL distribution name: "${distro}".`,
+    );
+  }
+  return distro === undefined ? {} : { distro };
+}
+
+/** The setting that turns on kubectl in WSL, or `undefined` when kubectl runs directly. */
+export function wslSetting(
+  platform: NodeJS.Platform = process.platform,
+): 'dev.containers.kubectlInWSL' | 'vs-kubernetes.use-wsl' | undefined {
+  if (platform !== 'win32') return undefined;
+  // Only a boolean counts: the string "false" would otherwise turn WSL on.
+  const raw = userValue<unknown>('dev.containers', 'kubectlInWSL');
+  const own = typeof raw === 'boolean' ? raw : undefined;
+  if (own !== undefined) return own ? 'dev.containers.kubectlInWSL' : undefined;
+  return userValue<unknown>(undefined, 'vs-kubernetes.use-wsl') === true
+    ? 'vs-kubernetes.use-wsl'
+    : undefined;
+}
+
+/** What the listing queries and a new attach use: the configured kubeconfig and WSL mode. */
+export function effectiveKubectlScope(): KubectlScope {
+  const wsl = effectiveWsl();
+  const kubeconfig = effectiveKubeconfig(wsl);
+  return {
+    ...(wsl === undefined ? {} : { wsl }),
+    ...(kubeconfig === undefined ? {} : { kubeconfig }),
+  };
+}
+
+/** A path only Windows can run, which makes no sense as kubectl inside WSL. */
+function isWindowsProgram(file: string): boolean {
+  return /^[A-Za-z]:/.test(file) || file.includes('\\') || /\.(exe|cmd|bat)$/i.test(file);
+}
+
+/**
+ * How kubectl is started for `wsl` (a window's recorded mode, or the configured one), with the
+ * path `remembered` for a pod window (see effectiveKubectlPath). In WSL,
+ * `dev.containers.kubectlPath` is a Linux path, and the Kubernetes extension's (Windows) paths do
+ * not apply; without one, the login shell's PATH finds kubectl. Sign-in pages open in the Windows
+ * browser unless `dev.containers.kubectlWSLBrowser` is `wsl`.
+ */
+export function kubectlLauncher(
+  wsl: WslSelection | undefined,
+  {
+    remembered,
+    platform = process.platform,
+  }: { remembered?: string | undefined; platform?: NodeJS.Platform } = {},
+): KubectlLauncher {
+  if (!wsl) return { kubectl: effectiveKubectlPath(remembered) };
+  if (platform !== 'win32') {
+    throw new DevContainerError(
+      'ENGINE_UNAVAILABLE',
+      'This target runs kubectl in WSL, which exists only on Windows.',
+    );
+  }
+  const own = readSettings().kubectlPath;
+  if (own !== undefined && isWindowsProgram(own)) {
+    throw new DevContainerError(
+      'CONFIG_INVALID',
+      `kubectl runs in WSL, so "dev.containers.kubectlPath" must be empty or a Linux path, not "${own}".`,
+    );
+  }
+  return {
+    kubectl: own ?? 'kubectl',
+    wsl,
+    ...(readSettings().kubectlWSLBrowser === 'windows' ? { windowsBrowser: windowsRoot() } : {}),
+  };
 }
 
 export interface AttachDependencies {
@@ -94,9 +183,13 @@ export interface AttachDependencies {
   kubectl: Kubectl;
   /** Records the window this opens, so the pod resolver opens it without asking. */
   targets: Pick<KnownTargets, 'add'>;
+  /** Keeps the Kubernetes extension's kubectl path for the window this opens. */
+  kubectlPaths: Pick<PodKubectlPaths, 'set'>;
   /** False (after guiding the user) when the proposed API that remote windows need is not enabled. */
   ensureRemoteSupport: () => Promise<boolean>;
   resolveTarget: (target: unknown) => Promise<ExplorerTarget | undefined>;
+  /** Which setting turned on kubectl in WSL, for the log. */
+  wslSetting?: () => string | undefined;
 }
 
 interface Choice<T> extends vscode.QuickPickItem {
@@ -122,6 +215,8 @@ async function chooseNamespace(
       );
     }
   } catch (error) {
+    // Ordinary users may not list namespaces; anything else (no cluster, no access) is reported.
+    if (!/forbidden/i.test(errorMessage(error))) throw error;
     deps.logger.log('info', `Could not list namespaces (${errorMessage(error)}); asking instead.`);
   }
   return nonEmpty(
@@ -139,11 +234,16 @@ async function chooseInteractively(
 ): Promise<{ context: string | undefined; namespace: string; pod: string } | undefined> {
   const current = await deps.kubectl.currentContext();
   const contexts = await deps.kubectl.contexts();
-  let context = current;
+  if (contexts.length === 0) {
+    throw noContextError(deps.kubectl.scope());
+  }
+  // Without a current context (or one that is not listed), kubectl would fall back to
+  // localhost:8080: a context is always named, so the window is fixed to a cluster.
+  let context = current !== undefined && contexts.includes(current) ? current : contexts[0];
   if (contexts.length > 1) {
     const ordered = [...contexts].sort((a, b) => Number(b === current) - Number(a === current));
     const chosen = await pick(
-      'Kubernetes context',
+      context === current ? 'Kubernetes context' : 'Kubernetes context (none is current)',
       ordered.map((name) => ({
         label: name,
         ...(name === current ? { description: 'current' } : {}),
@@ -159,7 +259,9 @@ async function chooseInteractively(
 
   const pods = await deps.kubectl.pods(context, namespace);
   if (pods.length === 0) {
-    void vscode.window.showInformationMessage(`There are no pods in namespace "${namespace}".`);
+    void vscode.window.showInformationMessage(
+      notificationText(`There are no pods in namespace "${namespace}".`),
+    );
     return undefined;
   }
   const pod = await pick(
@@ -210,10 +312,22 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
     void vscode.window.showInformationMessage('Select a pod to attach to.');
     return;
   }
+  const source = deps.wslSetting?.();
+  deps.logger.log(
+    'info',
+    `Attach (${explorer ? 'Kubernetes explorer' : 'command palette'}): ${deps.kubectl.describe()}` +
+      (source ? ` (WSL from "${source}")` : ''),
+  );
   if (explorer?.kind === 'pod') {
     // The explorer lists the pods of the current context, so that is the cluster to use. It is
     // fixed in the connection, so switching contexts later does not redirect an open window.
     context = await deps.kubectl.currentContext();
+    if (context === undefined) {
+      const scope = deps.kubectl.scope();
+      throw (await deps.kubectl.contexts()).length === 0
+        ? noContextError(scope)
+        : noCurrentContextError(scope, 'explorer');
+    }
     namespace = explorer.namespace;
     podName = explorer.name;
   } else {
@@ -222,15 +336,19 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
     ({ context, namespace, pod: podName } = chosen);
   }
 
-  const kubeconfig = effectiveKubeconfig();
+  // The kubeconfig and WSL mode the pod was listed with; the window keeps them.
+  const scope = deps.kubectl.scope();
   const pod = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Reading pod ${podName}` },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: notificationText(`Reading pod ${podName}`),
+    },
     () =>
       deps.kubectl.pod({
         namespace,
         pod: podName,
         ...(context === undefined ? {} : { context }),
-        ...(kubeconfig === undefined ? {} : { kubeconfig }),
+        ...scope,
       }),
   );
   const container = await chooseContainer(pod);
@@ -242,10 +360,13 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
     pod: podName,
     container,
     ...(context === undefined ? {} : { context }),
-    ...(kubeconfig === undefined ? {} : { kubeconfig }),
+    ...scope,
   });
   deps.logger.log('info', `Attaching to ${namespace}/${podName} (${container}) in a new window`);
   await deps.targets.add(authority);
+  // The new window may not see the Kubernetes extension's kubectl path (see effectiveKubectlPath).
+  // In WSL it does not apply.
+  await deps.kubectlPaths.set(authority, scope.wsl ? undefined : kubernetesKubectlPath());
   await vscode.commands.executeCommand('vscode.newWindow', {
     remoteAuthority: authority,
     reuseWindow: false,

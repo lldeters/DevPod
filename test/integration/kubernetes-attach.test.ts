@@ -5,10 +5,20 @@ import * as path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type * as vscode from 'vscode';
 import { Kubectl } from '../../src/core/k8s/kubectl';
+import { windowsRoot } from '../../src/core/k8s/launcher';
 import { decodePodAuthority } from '../../src/core/k8s/podRef';
 import { MemoryLogger } from '../../src/core/logger';
 import { KnownTargets } from '../../src/remote/knownTargets';
-import { attachToPod, effectiveKubeconfig, effectiveKubectlPath } from '../../src/ui/kubernetes';
+import { PodKubectlPaths } from '../../src/remote/podKubectlPaths';
+import {
+  attachToPod,
+  effectiveKubeconfig,
+  effectiveKubectlPath,
+  effectiveKubectlScope,
+  effectiveWsl,
+  kubectlLauncher,
+  wslSetting,
+} from '../../src/ui/kubernetes';
 import type { AttachDependencies, ExplorerTarget } from '../../src/ui/kubernetes';
 import * as mock from '../helpers/vscodeMock';
 import { createKubectlStub, listJson, podJson } from '../helpers/kubectlStub';
@@ -19,6 +29,7 @@ const { state } = mock;
 let root: string;
 let stub: KubectlStub;
 let targets: KnownTargets;
+let kubectlPaths: PodKubectlPaths;
 
 beforeAll(async () => {
   root = await realpath(await mkdtemp(path.join(tmpdir(), 'dck-attach-')));
@@ -34,6 +45,7 @@ afterAll(async () => {
 beforeEach(async () => {
   mock.reset();
   targets = new KnownTargets(new mock.MockMemento() as unknown as vscode.Memento);
+  kubectlPaths = new PodKubectlPaths(new mock.MockMemento() as unknown as vscode.Memento);
   await stub.reset();
   await stub.set('current-context', 'kind-test');
   await stub.set('pod.json', podJson());
@@ -45,10 +57,11 @@ function dependencies(
   return {
     logger: new MemoryLogger(),
     kubectl: new Kubectl(
-      () => stub.path,
-      () => effectiveKubeconfig(),
+      () => ({ kubectl: stub.path }),
+      () => effectiveKubectlScope(),
     ),
     targets,
+    kubectlPaths,
     ensureRemoteSupport: async () => options.supported ?? true,
     resolveTarget: async () => options.target,
   };
@@ -114,6 +127,23 @@ describe('attach from the Kubernetes explorer', () => {
     expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').container).toBe('app');
   });
 
+  it("keeps the Kubernetes extension's kubectl path for the new window, on this machine", async () => {
+    state.settings['vscode-kubernetes.kubectl-path'] = '/opt/k8s/kubectl';
+    const deps = dependencies({ target: clickedPod });
+    await attachToPod(deps, {});
+    const authority = openedWindow()?.remoteAuthority ?? '';
+    expect(kubectlPaths.get(authority)).toBe('/opt/k8s/kubectl');
+    const payload = Buffer.from(authority.slice(authority.indexOf('+') + 1), 'hex').toString();
+    expect(payload).not.toContain('/opt/k8s/kubectl'); // never in the authority
+
+    // An attach without that setting forgets it, so the window uses what the attach used.
+    delete state.settings['vscode-kubernetes.kubectl-path'];
+    state.executed = [];
+    await attachToPod(deps, {});
+    expect(openedWindow()?.remoteAuthority).toBe(authority);
+    expect(kubectlPaths.get(authority)).toBeUndefined();
+  });
+
   it('records the context at click time, so a later switch cannot redirect the window', async () => {
     await stub.set('current-context', 'prod-cluster');
     await attachToPod(dependencies({ target: clickedPod }), {});
@@ -147,6 +177,74 @@ describe('attach from the Kubernetes explorer', () => {
   it('reports a pod that does not exist', async () => {
     await stub.unset('pod.json');
     await expect(attachToPod(dependencies({ target: clickedPod }), {})).rejects.toThrow(/NotFound/);
+  });
+
+  it('refuses when kubectl has no current context, which the explorer would show', async () => {
+    await stub.unset('current-context');
+    await stub.set('contexts', 'ctx-a\nctx-b\n');
+    await expect(attachToPod(dependencies({ target: clickedPod }), {})).rejects.toThrow(
+      /^kubectl has no current Kubernetes context in its default kubeconfig.*may read another kubeconfig/s,
+    );
+    expect(openedWindow()).toBeUndefined();
+    expect((await stub.calls()).some((args) => args.includes('pod'))).toBe(false);
+  });
+
+  it('says that no kubeconfig was found when kubectl has no context at all', async () => {
+    await stub.unset('current-context');
+    await expect(attachToPod(dependencies({ target: clickedPod }), {})).rejects.toThrow(
+      /kubectl found no Kubernetes context in its kubeconfig/,
+    );
+    expect(openedWindow()).toBeUndefined();
+  });
+
+  it('logs which kubectl and kubeconfig it uses, and where WSL was turned on', async () => {
+    const deps = dependencies({ target: clickedPod });
+    deps.wslSetting = () => 'vs-kubernetes.use-wsl';
+    await attachToPod(deps, {});
+    const lines = (deps.logger as MemoryLogger).entries.map((entry) => entry.message);
+    expect(lines).toContain(
+      `Attach (Kubernetes explorer): kubectl "${stub.path}", kubeconfig kubectl's default ` +
+        '(WSL from "vs-kubernetes.use-wsl")',
+    );
+  });
+
+  it('records that kubectl runs in WSL, so the window keeps using it there', async () => {
+    const deps = dependencies({ target: clickedPod });
+    const wsl = { distro: 'Ubuntu-24.04' };
+    const launched: unknown[] = [];
+    deps.kubectl = new Kubectl(
+      (mode) => {
+        launched.push(mode);
+        return { kubectl: stub.path }; // the stub stands in for kubectl in WSL
+      },
+      () => ({ wsl, kubeconfig: '~/.kube/config' }),
+    );
+
+    await attachToPod(deps, {});
+
+    expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '')).toEqual({
+      context: 'kind-test',
+      namespace: 'dev',
+      pod: 'mypod',
+      container: 'app',
+      kubeconfig: '~/.kube/config', // expanded inside WSL, not here
+      wsl,
+    });
+    expect(launched.length).toBeGreaterThan(0);
+    expect(launched.every((mode) => mode === wsl)).toBe(true);
+    const queries = await stub.calls();
+    expect(queries.every((args) => args[0] === '--kubeconfig=~/.kube/config')).toBe(true);
+  });
+
+  it("keeps no Kubernetes extension's kubectl path for a window that runs kubectl in WSL", async () => {
+    state.settings['vscode-kubernetes.kubectl-path'] = 'C:\\tools\\kubectl.exe';
+    const deps = dependencies({ target: clickedPod });
+    deps.kubectl = new Kubectl(
+      () => ({ kubectl: stub.path }),
+      () => ({ wsl: {} }),
+    );
+    await attachToPod(deps, {});
+    expect(kubectlPaths.get(openedWindow()?.remoteAuthority ?? '')).toBeUndefined();
   });
 
   it('uses the configured kubeconfig for both the query and the connection', async () => {
@@ -207,6 +305,69 @@ describe('attach from the command palette', () => {
     expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').namespace).toBe('dev');
   });
 
+  it('offers every context when none is current, and records the choice', async () => {
+    await stub.unset('current-context');
+    await stub.set('contexts', 'ctx-a\nctx-b\n');
+    await stub.set('namespaces.json', listJson(['dev']));
+    await stub.set('pods.json', listJson(['mypod']));
+    state.quickPickSequence = [1, 0, 0]; // context "ctx-b", namespace "dev", pod "mypod"
+
+    await attachToPod(dependencies());
+
+    expect(state.quickPickTitles[0]).toBe('Kubernetes context (none is current)');
+    expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').context).toBe('ctx-b');
+  });
+
+  it('uses the only context when none is current, without asking', async () => {
+    await stub.unset('current-context');
+    await stub.set('contexts', 'only\n');
+    await stub.set('namespaces.json', listJson(['dev']));
+    await stub.set('pods.json', listJson(['mypod']));
+    state.quickPickSequence = [0, 0];
+
+    await attachToPod(dependencies());
+
+    expect(state.quickPickCalls).toHaveLength(2); // namespace and pod only
+    expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').context).toBe('only');
+    const listings = (await stub.calls()).filter((args) => args.includes('get'));
+    expect(listings.every((args) => args.includes('--context=only'))).toBe(true);
+  });
+
+  it('treats a current context that is not listed like none', async () => {
+    await stub.set('current-context', 'deleted');
+    await stub.set('contexts', 'only\n');
+    await stub.set('namespaces.json', listJson(['dev']));
+    await stub.set('pods.json', listJson(['mypod']));
+    state.quickPickSequence = [0, 0];
+    await attachToPod(dependencies());
+    expect(decodePodAuthority(openedWindow()?.remoteAuthority ?? '').context).toBe('only');
+  });
+
+  it('says that no kubeconfig was found, naming the configured one, before asking anything', async () => {
+    await stub.unset('current-context');
+    state.settings['dev.containers.kubeconfigPath'] = '/home/me/.kube/missing';
+    await expect(attachToPod(dependencies())).rejects.toThrow(
+      'kubectl found no Kubernetes context in "/home/me/.kube/missing": the file does not exist ' +
+        'or lists no contexts. Set "dev.containers.kubeconfigPath" to your kubeconfig.',
+    );
+    expect(state.quickPickCalls).toHaveLength(0);
+    expect(state.inputBoxCount).toBe(0);
+    expect((await stub.calls()).some((args) => args.includes('namespaces'))).toBe(false);
+  });
+
+  it('reports a failure to list namespaces that is not a refusal, instead of asking', async () => {
+    await stub.set('contexts', 'kind-test\n');
+    await stub.set(
+      'namespaces.error',
+      'The connection to the server 127.0.0.1:6443 was refused - did you specify the right host or port?',
+    );
+    await expect(attachToPod(dependencies())).rejects.toThrow(
+      /kubectl get namespaces failed: The connection to the server 127\.0\.0\.1:6443 was refused/,
+    );
+    expect(state.inputBoxCount).toBe(0);
+    expect(openedWindow()).toBeUndefined();
+  });
+
   it('stops quietly when the user cancels a question', async () => {
     await stub.set('contexts', 'kind-test\nother\n');
     state.quickPickSequence = [Number.NaN]; // items[NaN] is undefined: the user pressed Escape
@@ -246,6 +407,25 @@ describe('which kubectl and kubeconfig are used', () => {
     expect(effectiveKubeconfig()).toBe('/ext/config');
   });
 
+  it('falls back to the path remembered for a pod window, which may not see that setting', () => {
+    expect(effectiveKubectlPath('/remembered/kubectl')).toBe('/remembered/kubectl');
+    expect(effectiveKubectlPath('~/bin/kubectl')).toBe(path.join(homedir(), 'bin', 'kubectl'));
+    expect(kubectlLauncher(undefined, { remembered: '/remembered/kubectl' })).toEqual({
+      kubectl: '/remembered/kubectl',
+    });
+    state.settings['vscode-kubernetes.kubectl-path'] = '/now/kubectl';
+    expect(effectiveKubectlPath('/remembered/kubectl')).toBe('/now/kubectl'); // seen: it is current
+    state.settings['dev.containers.kubectlPath'] = '/own/kubectl';
+    expect(effectiveKubectlPath('/remembered/kubectl')).toBe('/own/kubectl');
+    // In WSL, only this extension's setting applies, as a Linux path.
+    delete state.settings['dev.containers.kubectlPath'];
+    expect(kubectlLauncher({}, { remembered: '/remembered/kubectl', platform: 'win32' })).toEqual({
+      kubectl: 'kubectl',
+      wsl: {},
+      windowsBrowser: windowsRoot(),
+    });
+  });
+
   it('uses kubectl from PATH and its own kubeconfig lookup by default', () => {
     expect(effectiveKubectlPath()).toBe('kubectl');
     expect(effectiveKubeconfig()).toBeUndefined();
@@ -270,6 +450,133 @@ describe('which kubectl and kubeconfig are used', () => {
     state.settings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': '/home/me/.kube/config' };
     expect(effectiveKubectlPath()).toBe('/usr/local/bin/kubectl'); // the user's own value
     expect(effectiveKubeconfig()).toBe('/home/me/.kube/config');
+  });
+
+  it('takes no Kubernetes setting from the container side in a pod window', () => {
+    state.remoteName = 'k8s-pod';
+    state.settings['vscode-kubernetes.kubectl-path'] = '/usr/local/bin/kubectl';
+    expect(effectiveKubectlPath()).toBe('/usr/local/bin/kubectl');
+    state.remoteSettings['vscode-kubernetes.kubectl-path'] = '/elsewhere/kubectl';
+    state.remoteSettings['dev.containers.kubectlPath'] = '/elsewhere/own-kubectl';
+    state.remoteSettings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': '/elsewhere/config' };
+    state.remoteSettings['dev.containers.kubeconfigPath'] = '/elsewhere/own-config';
+    expect(effectiveKubectlPath()).toBe('/usr/local/bin/kubectl');
+    expect(effectiveKubeconfig()).toBeUndefined();
+  });
+
+  it('lets no container or pod turn on WSL', () => {
+    state.remoteName = 'k8s-pod';
+    state.remoteSettings['dev.containers.kubectlInWSL'] = true;
+    state.remoteSettings['vs-kubernetes.use-wsl'] = true;
+    expect(effectiveWsl('win32')).toBeUndefined();
+    state.settings['dev.containers.kubectlInWSL'] = true;
+    expect(effectiveWsl('win32')).toEqual({});
+  });
+
+  it('takes only a boolean for kubectlInWSL, so the string "false" does not turn WSL on', () => {
+    state.settings['dev.containers.kubectlInWSL'] = 'false';
+    expect(wslSetting('win32')).toBeUndefined();
+    expect(effectiveWsl('win32')).toBeUndefined();
+    // Not a boolean, so the Kubernetes extension's setting decides.
+    state.settings['vs-kubernetes.use-wsl'] = true;
+    expect(wslSetting('win32')).toBe('vs-kubernetes.use-wsl');
+  });
+
+  it('runs kubectl directly by default, and never in WSL outside Windows', () => {
+    expect(effectiveWsl('win32')).toBeUndefined();
+    state.settings['dev.containers.kubectlInWSL'] = true;
+    expect(effectiveWsl('linux')).toBeUndefined();
+    expect(effectiveWsl('darwin')).toBeUndefined();
+    expect(effectiveWsl('win32')).toEqual({});
+  });
+
+  it('runs kubectl in the configured WSL distribution', () => {
+    state.settings['dev.containers.kubectlInWSL'] = true;
+    state.settings['dev.containers.kubectlWSLDistro'] = 'Ubuntu-24.04';
+    expect(effectiveWsl('win32')).toEqual({ distro: 'Ubuntu-24.04' });
+    state.settings['dev.containers.kubectlWSLDistro'] = 'Ubuntu; rm -rf ~';
+    expect(() => effectiveWsl('win32')).toThrow(/not a valid WSL distribution name/);
+  });
+
+  it("follows the Kubernetes extension's use-wsl unless this extension's setting decides", () => {
+    state.settings['vs-kubernetes.use-wsl'] = true;
+    expect(effectiveWsl('win32')).toEqual({});
+    state.settings['dev.containers.kubectlInWSL'] = false;
+    expect(effectiveWsl('win32')).toBeUndefined();
+  });
+
+  it('lets no workspace turn on WSL', () => {
+    state.workspaceSettings['dev.containers.kubectlInWSL'] = true;
+    state.workspaceSettings['vs-kubernetes.use-wsl'] = true;
+    expect(effectiveWsl('win32')).toBeUndefined();
+  });
+
+  it('starts kubectl in WSL from its Linux path, or from the login PATH', () => {
+    const wsl = { distro: 'Ubuntu' };
+    const windowsBrowser = windowsRoot();
+    state.settings['vscode-kubernetes.kubectl-path'] = 'C:\\tools\\kubectl.exe';
+    // not the Windows one
+    expect(kubectlLauncher(wsl, { platform: 'win32' })).toEqual({
+      kubectl: 'kubectl',
+      wsl,
+      windowsBrowser,
+    });
+    state.settings['dev.containers.kubectlPath'] = '/usr/local/bin/kubectl';
+    expect(kubectlLauncher(wsl, { platform: 'win32' })).toEqual({
+      kubectl: '/usr/local/bin/kubectl',
+      wsl,
+      windowsBrowser,
+    });
+    state.settings['dev.containers.kubectlPath'] = '~/bin/kubectl';
+    expect(kubectlLauncher(wsl, { platform: 'win32' })).toEqual({
+      kubectl: '~/bin/kubectl',
+      wsl,
+      windowsBrowser,
+    });
+  });
+
+  it('opens sign-in pages of kubectl in WSL in the Windows browser unless set to WSL', () => {
+    expect(kubectlLauncher({}, { platform: 'win32' }).windowsBrowser).toBe(windowsRoot());
+    state.settings['dev.containers.kubectlWSLBrowser'] = 'wsl';
+    expect(kubectlLauncher({}, { platform: 'win32' })).toEqual({ kubectl: 'kubectl', wsl: {} });
+    state.settings['dev.containers.kubectlWSLBrowser'] = 'windows';
+    expect(kubectlLauncher({}, { platform: 'win32' }).windowsBrowser).toBe(windowsRoot());
+    // the setting only concerns WSL
+    expect(kubectlLauncher(undefined, { platform: 'win32' })).not.toHaveProperty('windowsBrowser');
+  });
+
+  it('reports a Windows kubectl path in WSL mode instead of running it', () => {
+    for (const kubectl of ['C:\\tools\\kubectl.exe', 'kubectl.exe', 'D:/k/kubectl', 'k\\kubectl']) {
+      state.settings['dev.containers.kubectlPath'] = kubectl;
+      expect(() => kubectlLauncher({}, { platform: 'win32' }), kubectl).toThrow(
+        /must be empty or a Linux path/,
+      );
+    }
+  });
+
+  it('refuses a window that runs kubectl in WSL outside Windows', () => {
+    expect(() => kubectlLauncher({}, { platform: 'linux' })).toThrow(
+      /WSL, which exists only on Windows/,
+    );
+    expect(kubectlLauncher(undefined, { platform: 'linux' })).toEqual({ kubectl: 'kubectl' });
+  });
+
+  it('leaves ~ in the kubeconfig to WSL', () => {
+    state.settings['dev.containers.kubeconfigPath'] = '~/.kube/config';
+    expect(effectiveKubeconfig({})).toBe('~/.kube/config');
+    expect(effectiveKubeconfig()).toBe(path.join(homedir(), '.kube', 'config'));
+    state.settings['dev.containers.kubeconfigPath'] = '';
+    state.settings['vs-kubernetes'] = { 'vs-kubernetes.kubeconfig': 'C:\\Users\\me\\config' };
+    expect(effectiveKubeconfig({})).toBe('C:\\Users\\me\\config'); // converted inside WSL
+  });
+
+  it('expands ~ in every file of a kubeconfig list, and leaves the list to WSL there', () => {
+    const list = ['~/.kube/iat.yaml', '/abs/prd.yaml'].join(path.delimiter);
+    state.settings['dev.containers.kubeconfigPath'] = list;
+    expect(effectiveKubeconfig()).toBe(
+      [path.join(homedir(), '.kube', 'iat.yaml'), '/abs/prd.yaml'].join(path.delimiter),
+    );
+    expect(effectiveKubeconfig({})).toBe(list);
   });
 
   it('reads ~ as the home directory, since kubectl is started without a shell', () => {

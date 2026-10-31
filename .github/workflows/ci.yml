@@ -6,6 +6,11 @@ on:
   pull_request:
   # The release workflow runs the whole CI, end-to-end tests included, before it publishes.
   workflow_call:
+    inputs:
+      artifact:
+        description: Name of the VSIX artifact; the release passes its own to keep its VSIX apart.
+        type: string
+        default: devcontainers-kiro-vsix
 
 permissions:
   contents: read
@@ -36,9 +41,12 @@ jobs:
         run: npm run test:smoke
       - name: Package VSIX
         run: npx vsce package --out devcontainers-kiro.vsix
+      # Branch and pull request builds (forks included) upload devcontainers-kiro-vsix, the release run
+      # the name its publish job takes. The name keeps them apart but proves nothing about where a VSIX
+      # came from: a pull request can change this file.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: devcontainers-kiro-vsix
+          name: ${{ inputs.artifact || 'devcontainers-kiro-vsix' }}
           path: devcontainers-kiro.vsix
 
   e2e:
@@ -84,3 +92,26 @@ jobs:
       - run: npm run test:e2e:k8s
         env:
           DCK_E2E_K8S: '1'
+
+  e2e-wsl:
+    name: kubectl in WSL (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # WSL 1 needs no virtual machine on the runner. wsl.exe, the Windows command line and the stdio
+      # relay that this checks are the same for WSL 2.
+      - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 1
+      - run: npm run test:e2e:wsl
+        env:
+          DCK_E2E_WSL: '1'
+          DCK_WSL_DISTRO: Ubuntu-24.04

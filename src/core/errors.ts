@@ -12,7 +12,10 @@ export type ErrorCode =
   | 'SERVER_UNSUPPORTED'
   | 'SERVER_INSTALL_FAILED';
 
-/** Error with a stable machine-readable code; the message is safe to show to users. */
+/**
+ * Error with a stable machine-readable code. The message is meant for users; it can quote output of
+ * other programs, so a notification shows it through `notificationText`.
+ */
 export class DevContainerError extends Error {
   constructor(
     readonly code: ErrorCode,
@@ -30,4 +33,13 @@ export function isDevContainerError(error: unknown): error is DevContainerError 
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * `text` for a notification of the IDE, which turns `[label](target)` into a link, also for
+ * `command:` targets. Messages can quote output of a container, a pod, kubectl or the Dev Container
+ * CLI, so the link syntax is broken up; the rest of the text is unchanged.
+ */
+export function notificationText(text: string): string {
+  return text.replace(/\]\(/g, '] (');
 }

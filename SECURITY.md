@@ -24,13 +24,33 @@ steps to reproduce and the impact you see.
   `initializeCommand` on this machine, or kubectl with the kubeconfig it names.
 - This machine's Kiro sign-in is copied into a container or pod only after the user agrees in a
   dialog (default, `dev.containers.shareKiroLogin: "ask"`), and only if the container has none.
-- The IDE server is downloaded over `https` only (or from a file inside the container). In the
-  fallback folder used when the home directory is not writable, the server is installed only if
-  that folder belongs to the user.
+- MCP servers are registered in a pod's `~/.kiro/settings/mcp.json`, which decides what Kiro runs
+  there, only from the local user settings (`dev.containers.mcpGitlab.*`,
+  `dev.containers.mcpServers`), never from a workspace or the pod's own settings. Tokens are written
+  only as references to the pod's environment; entries with something that looks like a secret in
+  plain text (by the names of variables, headers, flags and URL parameters, and passwords in URLs)
+  are not written. The values of those variables never leave the pod: the extension only learns
+  whether they are set. Folders and files in the pod's home directory are written only if they
+  belong to the pod user, through a new file that is renamed into place, and an entry the
+  extension did not write is never changed.
+- The IDE server is downloaded over `https` only (or from a file inside the container), also after
+  redirects. Kiro publishes no checksum or signature for its server archives (only for its desktop
+  builds), so the archive is trusted on the strength of that connection, as in Kiro's own remote
+  installer. In the fallback folder used when the home directory is not writable, the server is
+  installed only if that folder belongs to the user, and in the home directory only if the server's
+  own folder does (someone else could have created it where others may write to the home directory,
+  as to an `emptyDir` volume).
 - Values of environment and build arguments, and the values of environment variables whose names
   look like secrets (for example `NPM_TOKEN`), are masked in everything logged or shown from the
   Dev Container CLI, so a log can be shared. Show Diagnostics replaces the home directory by `~`.
-- Paths to programs and to kubeconfig files come from user (or machine) settings only, never from a
-  workspace; this includes the fallback to the Kubernetes extension's settings.
+- Paths to programs and to kubeconfig files, whether kubectl runs in WSL, whether the Kiro sign-in
+  is shared and which MCP servers are set up in pods come from the local user settings only (scope
+  `application`): never from a workspace, and never from the settings on the side of a container or
+  pod, which a remote window would otherwise apply. This includes the fallback to the Kubernetes
+  extension's settings. Such settings in a `devcontainer.json` are reported and not written into
+  the container. In WSL, kubectl is
+  started with `wsl.exe --exec`, so no shell interprets its
+  arguments; the login profile is read only for `PATH` and `KUBECONFIG`, with its input and output
+  detached.
 - The extension edits the IDE's `argv.json` (to enable a proposed API) only after an explicit
   confirmation.

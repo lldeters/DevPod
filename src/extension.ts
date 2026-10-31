@@ -12,13 +12,15 @@ import { POD_AUTHORITY_PREFIX } from './core/k8s/podRef';
 import { PodResolver } from './remote/podResolver';
 import { readServerBuildInfo } from './remote/product';
 import { KnownTargets } from './remote/knownTargets';
+import { PodKubectlPaths } from './remote/podKubectlPaths';
 import { RebuildRequests } from './remote/rebuildRequests';
 import { DevContainerResolver } from './remote/resolver';
 import { registerCommands } from './ui/commands';
 import { kiroLoginFor } from './ui/kiroLogin';
+import { mcpSetupFor, VariableHint } from './ui/mcp';
 import { OutputLogger } from './ui/logging';
 import { promptToReopen } from './ui/prompt';
-import { effectiveKubeconfig, effectiveKubectlPath } from './ui/kubernetes';
+import { effectiveKubectlScope, kubectlLauncher } from './ui/kubernetes';
 import { RemoteSupport } from './ui/remoteState';
 import { readSettings } from './ui/settings';
 import { registerStatusBar } from './ui/statusBar';
@@ -73,15 +75,19 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   context.subscriptions.push(resolver);
 
-  const kubectl = new Kubectl(effectiveKubectlPath, effectiveKubeconfig);
+  const kubectl = new Kubectl((wsl) => kubectlLauncher(wsl), effectiveKubectlScope);
+  const kubectlPaths = new PodKubectlPaths(context.globalState);
+  const variableHint = new VariableHint(context.globalState);
   const podResolver = new PodResolver({
     logger,
     kubectl,
-    kubectlPath: effectiveKubectlPath,
+    kubectlLauncher: (wsl, authority) =>
+      kubectlLauncher(wsl, { remembered: kubectlPaths.get(authority) }),
     targets,
     serverBuild: readServerBuildInfo,
     serverUrlTemplate: () => readSettings().serverDownloadUrlTemplate,
     kiroLogin,
+    mcp: (target) => mcpSetupFor(target, context.extensionPath, variableHint, logger),
   });
   context.subscriptions.push(podResolver);
 
@@ -108,6 +114,7 @@ export function activate(context: vscode.ExtensionContext): void {
       targets,
       remoteSupport,
       kubectl,
+      kubectlPaths,
     }),
     registerStatusBar(),
   );

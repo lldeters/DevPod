@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.6 (2026-10-31)
+
+Security updates of the development and release tooling. The extension itself is unchanged: none of
+these packages is part of the bundle or the VSIX.
+
+- `follow-redirects` 1.16.2 (#19), used by `ovsx`, which the release workflow publishes with:
+  [GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p) (high), credentials
+  could follow a redirect to another host.
+- `minimatch` 11.0.3 and `glob` 14.0.3 (#20), used by ESLint, typescript-eslint and `@vscode/vsce`,
+  pinned with `overrides`:
+  [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249) (moderate, denial of
+  service) and [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) (moderate,
+  `AbortSignal` bypass). The files ESLint checks and the files packaged into the VSIX are the same
+  as before.
+
 ## 0.2.5 (2026-10-30)
 
 - **MCP servers in pods** (#17): attaching to a pod registers MCP servers in Kiro's

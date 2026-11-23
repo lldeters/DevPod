@@ -49,7 +49,9 @@ export interface KubectlStub {
   calls(): Promise<string[][]>;
   /**
    * Sets a canned answer: pod.json, pods.json, namespaces.json, contexts, current-context, or
-   * namespaces.error (the message listing namespaces fails with).
+   * namespaces.error (the message listing namespaces fails with). For the queries that contact the
+   * cluster (namespaces, pods, pod): `stderr` is written to stderr first, as a credential plugin
+   * would, and with `hang` the answer waits until `release` is set (or the stub is killed).
    */
   set(name: string, content: string): Promise<void>;
   /** Removes one canned answer, so that query fails like a kubectl error. */
@@ -69,6 +71,19 @@ const read = (name) => { try { return fs.readFileSync(dir + '/' + name, 'utf8');
 const fail = (message) => { process.stderr.write(message + '\\n'); process.exit(1); };
 
 const separator = args.indexOf('--');
+const cluster = !has('exec') && !has('config');
+if (cluster && read('stderr') !== undefined) process.stderr.write(read('stderr'));
+if (cluster && read('hang') !== undefined && read('release') === undefined) {
+  const timer = setInterval(() => {
+    if (read('release') === undefined) return;
+    clearInterval(timer);
+    answer();
+  }, 25);
+} else {
+  answer();
+}
+
+function answer() {
 if (has('exec') && separator >= 0) {
   const command = args.slice(separator + 1);
   const child = spawn(command[0], command.slice(1), {
@@ -97,6 +112,7 @@ if (has('exec') && separator >= 0) {
   value === undefined ? fail('Error from server (NotFound): pods "x" not found') : process.stdout.write(value);
 } else {
   fail('unsupported kubectl call: ' + args.join(' '));
+}
 }
 `;
 
@@ -133,6 +149,9 @@ export async function createKubectlStub(root: string): Promise<KubectlStub> {
         'contexts',
         'current-context',
         'namespaces.error',
+        'stderr',
+        'hang',
+        'release',
       ]) {
         await rm(path.join(dir, name), { force: true });
       }

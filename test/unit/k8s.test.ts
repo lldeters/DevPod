@@ -15,11 +15,34 @@ import {
   isPodAuthority,
 } from '../../src/core/k8s/podRef';
 import type { PodRef } from '../../src/core/k8s/podRef';
+import { kiroTrustName } from '../helpers/kiro';
 
 const ref: PodRef = { context: 'kind-dev', namespace: 'team-a', pod: 'web-7d9f', container: 'app' };
 
 const hex = (value: unknown): string =>
   `k8s-pod+${Buffer.from(JSON.stringify(value), 'utf8').toString('hex')}`;
+
+describe('the name Kiro shows when it asks whether to trust the pod', () => {
+  it('names pod and namespace instead of the hex string', () => {
+    expect(kiroTrustName(encodePodAuthority(ref))).toBe('pod web-7d9f in team-a');
+    expect(
+      kiroTrustName(
+        encodePodAuthority({ namespace: 'iat', pod: 'ldeters-server-0', container: 'c', wsl: {} }),
+      ),
+    ).toBe('pod ldeters-server-0 in iat');
+  });
+
+  it('must name the pod of the authority; authorities without one still work', () => {
+    const { context: _context, ...fields } = ref;
+    expect(decodePodAuthority(hex({ v: 1, ...ref }))).toEqual(ref);
+    expect(
+      decodePodAuthority(hex({ v: 1, hostName: 'pod web-7d9f in team-a', ...fields })),
+    ).toEqual(fields);
+    expect(() =>
+      decodePodAuthority(hex({ v: 1, hostName: 'pod trusted in prod', ...ref })),
+    ).toThrowError(/display name/);
+  });
+});
 
 describe('pod authority', () => {
   it('round-trips with and without context and kubeconfig', () => {

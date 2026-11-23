@@ -4,7 +4,8 @@ Open-source [dev container](https://containers.dev) support for the [Kiro](https
 reopen a folder inside a container, with the IDE server, terminal, extensions and language
 tooling running in it.
 
-> **Status: experimental (0.2.6), real-world tested.**
+> **Status: experimental (0.2.7), real-world tested in Kiro 1.4.26.**
+> 0.2.7 is checked against Kiro 1.5.11 (VS Code 1.145.0) but not yet verified in it.
 > Verified in Kiro 1.4.26 (VS Code 1.131) on Windows with Docker Desktop (Docker 29.2.0):
 > _Reopen in Container_, terminal and file editing in the container, installing extensions, a Kiro
 > agent session, _Rebuild Container_, _Reopen Folder Locally_, reconnecting to a running container,
@@ -17,12 +18,19 @@ tooling running in it.
 > clusters than Docker Desktop's, and MCP servers in pods (these are covered by automated tests
 > only, including a real kind cluster for pods in CI). See [docs/TESTING.md](docs/TESTING.md).
 
+**Kiro 1.5.11 brings its own Dev Containers** (_Dev Containers: Reopen in Container_, also on an
+SSH host; see [Kiro's documentation](https://kiro.dev/docs/ide/remote-development/dev-containers/)).
+It does not attach to Kubernetes pods, which is what this extension adds. Both can be installed
+together: they use different commands, settings and remote names (`kiro-dev-container` and
+`dev-container`). If you use Kiro's, set `dev.containers.promptToReopen` to `false`, so only Kiro
+offers to reopen a folder in a container.
+
 This is an independent community project. It is **not affiliated with Microsoft or Amazon**, and
 it is a clean-room implementation: it contains no code from Microsoft's proprietary "Dev
 Containers" extension. It builds on the public specification and the open-source
 [Dev Container CLI](https://github.com/devcontainers/cli). See [NOTICE](NOTICE).
 
-## Features (0.2.6)
+## Features (0.2.7)
 
 - Detects dev container configurations (`.devcontainer/devcontainer.json`, `.devcontainer.json`,
   `.devcontainer/<name>/devcontainer.json`) and lets you pick one.
@@ -148,6 +156,31 @@ attached with, which this extension keeps on your machine (attach again after ch
 
 A pod has no `devcontainer.json`, so nothing is built or configured: extensions and settings from a
 dev container configuration do not apply to pods. Port forwarding works as for containers.
+
+### Sign-ins of kubectl and waiting for the cluster
+
+Reading the pod is the first step that contacts the cluster. A kubeconfig with a credential plugin
+(OIDC with `kubectl oidc-login`, Azure's `kubelogin`, Pinniped, ...) may ask for a sign-in there,
+and an unreachable cluster answers only after timeouts. So this runs under a notification with a
+_Cancel_ button (_Reading pod …_, and in the new window _Attaching to pod …_):
+
+- What kubectl and its plugins write while they run appears in the notification and in the log
+  (_Output → Kiro Dev Containers_), line by line.
+- When they ask to open a page to sign in, possibly with a device code, a notification names both
+  and offers **Open in Browser** and **Copy Code and Open**. Only https addresses and http on this
+  machine (a plugin's callback such as `http://localhost:8000`) are offered.
+- After 15 seconds the notification says that kubectl is still running and may be waiting for a
+  sign-in or for the cluster.
+- **Cancel** stops kubectl; no window is opened.
+
+kubectl in WSL keeps its own token cache, separate from a kubectl on Windows, so it may ask for a
+sign-in although the Kubernetes explorer lists the pods without one. A plugin that opens a browser
+itself does so through the shim described in [kubectl in WSL](#kubectl-in-wsl).
+
+**Kiro 1.5.11 then asks whether to trust the remote** (_Do you trust the remote host 'pod mypod in
+dev'?_) before it starts extensions in the new window. That question comes from Kiro, not from this
+extension; _Trust and Connect_ goes on, _Always trust this remote host_ remembers the answer for this
+pod.
 
 ### kubectl in WSL
 

@@ -90,12 +90,24 @@ export function isPodAuthority(authority: string | undefined): authority is stri
 
 interface Payload extends PodRef {
   v: 1;
+  hostName: string;
+}
+
+/**
+ * How the IDE names the pod. Kiro (since 1.5.11) asks whether to trust a remote before it starts
+ * extensions there and names it by the `hostName` of the authority's JSON, if that has only the
+ * characters it accepts (letters, digits, `._~:-[]` and single spaces); otherwise it shows the
+ * whole hex string. Kubernetes names always fit.
+ */
+export function podHostName(ref: Pick<PodRef, 'namespace' | 'pod'>): string {
+  return `pod ${ref.pod} in ${ref.namespace}`;
 }
 
 export function encodePodAuthority(ref: PodRef): string {
   assertPodRef(ref);
   const payload: Payload = {
     v: 1,
+    hostName: podHostName(ref),
     namespace: ref.namespace,
     pod: ref.pod,
     container: ref.container,
@@ -151,6 +163,10 @@ export function decodePodAuthority(authority: string): PodRef {
     ...(wsl === undefined ? {} : { wsl }),
   };
   assertPodRef(ref);
+  // Only a display name, but the IDE shows it when it asks whether to trust the pod: it must name
+  // this pod (authorities from before 0.2.7 have none).
+  const hostName = text(record, 'hostName', false);
+  if (hostName !== undefined && hostName !== podHostName(ref)) fail('display name');
   return ref;
 }
 

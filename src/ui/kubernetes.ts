@@ -7,13 +7,14 @@ import * as vscode from 'vscode';
 import { DevContainerError, errorMessage, notificationText } from '../core/errors';
 import { checkContainerRunning } from '../core/k8s/attach';
 import { noContextError, noCurrentContextError } from '../core/k8s/kubectl';
-import type { Kubectl, KubectlScope, PodInfo } from '../core/k8s/kubectl';
+import type { Kubectl, KubectlScope, PodInfo, QueryOptions } from '../core/k8s/kubectl';
 import { isValidWslDistro, kubeconfigFiles, windowsRoot } from '../core/k8s/launcher';
 import type { KubectlLauncher, WslSelection } from '../core/k8s/launcher';
 import { encodePodAuthority } from '../core/k8s/podRef';
 import type { Logger } from '../core/logger';
 import type { KnownTargets } from '../remote/knownTargets';
 import type { PodKubectlPaths } from '../remote/podKubectlPaths';
+import { withKubectlProgress } from '../remote/kubectlFeedback';
 import { readSettings, userValue } from './settings';
 
 /** What a right-click in the Kubernetes explorer pointed at. */
@@ -190,6 +191,26 @@ export interface AttachDependencies {
   resolveTarget: (target: unknown) => Promise<ExplorerTarget | undefined>;
   /** Which setting turned on kubectl in WSL, for the log. */
   wslSetting?: () => string | undefined;
+  /** After how long a kubectl query is reported as still running; replaceable in tests. */
+  slowQueryMs?: number;
+}
+
+/**
+ * Runs one kubectl query that contacts the cluster under a cancellable notification, which shows
+ * what kubectl and its credential plugins write while they run (a sign-in, for example).
+ */
+function clusterQuery<T>(
+  deps: AttachDependencies,
+  title: string,
+  label: string,
+  query: (options: QueryOptions) => Promise<T>,
+): Promise<T> {
+  return withKubectlProgress(
+    notificationText(title),
+    deps.logger,
+    (feedback) => feedback.run(label, query),
+    deps.slowQueryMs,
+  );
 }
 
 interface Choice<T> extends vscode.QuickPickItem {
@@ -207,7 +228,9 @@ async function chooseNamespace(
   context: string | undefined,
 ): Promise<string | undefined> {
   try {
-    const names = await deps.kubectl.namespaces(context);
+    const names = await clusterQuery(deps, 'Listing namespaces', 'get namespaces', (options) =>
+      deps.kubectl.namespaces(context, options),
+    );
     if (names.length > 0) {
       return await pick(
         'Namespace',
@@ -257,7 +280,9 @@ async function chooseInteractively(
   const namespace = await chooseNamespace(deps, context);
   if (!namespace) return undefined;
 
-  const pods = await deps.kubectl.pods(context, namespace);
+  const pods = await clusterQuery(deps, `Listing pods in ${namespace}`, 'get pods', (options) =>
+    deps.kubectl.pods(context, namespace, options),
+  );
   if (pods.length === 0) {
     void vscode.window.showInformationMessage(
       notificationText(`There are no pods in namespace "${namespace}".`),
@@ -338,18 +363,13 @@ export async function attachToPod(deps: AttachDependencies, target?: unknown): P
 
   // The kubeconfig and WSL mode the pod was listed with; the window keeps them.
   const scope = deps.kubectl.scope();
-  const pod = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: notificationText(`Reading pod ${podName}`),
-    },
-    () =>
-      deps.kubectl.pod({
-        namespace,
-        pod: podName,
-        ...(context === undefined ? {} : { context }),
-        ...scope,
-      }),
+  // The first query that contacts the cluster: a credential plugin may ask for a sign-in here.
+  const pod = await clusterQuery(deps, `Reading pod ${podName}`, 'get pod', (options) =>
+    deps.kubectl.pod(
+      { namespace, pod: podName, ...(context === undefined ? {} : { context }), ...scope },
+      undefined,
+      options,
+    ),
   );
   const container = await chooseContainer(pod);
   if (!container) return;

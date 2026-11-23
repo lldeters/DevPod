@@ -10,7 +10,9 @@ export type ErrorCode =
   | 'CLI_BAD_OUTPUT'
   | 'ENGINE_UNAVAILABLE'
   | 'SERVER_UNSUPPORTED'
-  | 'SERVER_INSTALL_FAILED';
+  | 'SERVER_INSTALL_FAILED'
+  /** The user stopped the operation; nothing needs to be reported. */
+  | 'CANCELLED';
 
 /**
  * Error with a stable machine-readable code. The message is meant for users; it can quote output of
@@ -29,6 +31,11 @@ export class DevContainerError extends Error {
 
 export function isDevContainerError(error: unknown): error is DevContainerError {
   return error instanceof DevContainerError;
+}
+
+/** Whether `error` means that the user cancelled, which is not reported as a failure. */
+export function isCancelled(error: unknown): boolean {
+  return error instanceof DevContainerError && error.code === 'CANCELLED';
 }
 
 export function errorMessage(error: unknown): string {

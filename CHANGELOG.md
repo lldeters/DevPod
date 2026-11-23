@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.2.7 (2026-11-23)
+
+Fixes an _Attach to Kiro_ that seemed to load forever: with kubectl in WSL and a kubeconfig whose
+credential plugin asks for a sign-in, the notification _Reading pod …_ stayed open without a word,
+because kubectl waited for the sign-in and nothing showed it. Checked against Kiro 1.5.11 (VS Code
+1.145.0); not yet verified in Kiro.
+
+- **kubectl queries that contact the cluster are visible and can be cancelled.** Reading the pod
+  (and, from the command palette, listing namespaces and pods) runs under a notification with a
+  _Cancel_ button. What kubectl and its credential plugins write to stderr appears in the
+  notification and in the log as it is written, not only after kubectl ends. After 15 seconds the
+  notification says that kubectl may be waiting for a sign-in or for the cluster. Cancelling stops
+  kubectl and opens no window; it is not reported as an error.
+- **Sign-ins of credential plugins are offered with a button.** When kubectl's stderr asks to open
+  a page to sign in (Azure's `kubelogin` with a device code, `kubectl oidc-login`, Pinniped, ...), a
+  notification names the page and the code and offers _Open in Browser_ and _Copy Code and Open_.
+  Only https addresses, or http on this machine (a plugin's callback), are offered, never an
+  address in kubectl's own errors, and only for queries kubectl runs here, not for commands in the
+  pod.
+- **The pod window does the same.** It used to read the pod before its notification appeared, so a
+  sign-in there left only the IDE's _Opening Remote..._; now reading the pod is part of the
+  cancellable notification _Attaching to pod …_, before anything runs in the pod.
+- **Kiro 1.5.11 asks whether to trust a remote** before it starts extensions in it. For windows of
+  this extension it named the remote by the whole hex string of the authority. Authorities now carry
+  a display name, which Kiro shows instead: `pod <pod> in <namespace>` for pods and
+  `dev container <folder>` for containers (when the folder name has only the characters Kiro
+  accepts). The name is checked when an authority is read, so a link cannot name another pod;
+  windows from earlier versions still open.
+- The log names the IDE's own version and its VS Code base (`Kiro 1.5.11`, `VS Code 1.145.0`)
+  instead of `Kiro 1.145.0`.
+
 ## 0.2.6 (2026-10-31)
 
 Security updates of the development and release tooling. The extension itself is unchanged: none of

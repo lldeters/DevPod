@@ -17,8 +17,28 @@ export interface AuthorityParams {
 
 interface Payload {
   v: 1;
+  hostName?: string;
   hostPath: string;
   configFile?: string;
+}
+
+// What Kiro accepts as the name of a remote in the question whether to trust it (since 1.5.11).
+const KIRO_HOST_NAME = /^[A-Za-z0-9._~:\-[\]]+(?: [A-Za-z0-9._~:\-[\]]+)*$/;
+
+/**
+ * How the IDE names the container: by its folder. Kiro asks whether to trust a remote before it
+ * starts extensions there and names it by the `hostName` of the authority's JSON, if that has only
+ * the characters it accepts; otherwise (and for a folder name with other characters, for which
+ * this is `undefined`) it shows the whole hex string.
+ */
+export function containerHostName(hostPath: string): string | undefined {
+  const name =
+    hostPath
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() ?? '';
+  const candidate = `dev container ${name}`;
+  return name !== '' && KIRO_HOST_NAME.test(candidate) ? candidate : undefined;
 }
 
 function isAbsolute(candidate: string): boolean {
@@ -71,7 +91,12 @@ export function isDevContainerAuthority(authority: string | undefined): authorit
 
 export function encodeAuthority(params: AuthorityParams): string {
   assertPath(params.hostPath, 'folder path');
-  const payload: Payload = { v: 1, hostPath: params.hostPath };
+  const hostName = containerHostName(params.hostPath);
+  const payload: Payload = {
+    v: 1,
+    ...(hostName === undefined ? {} : { hostName }),
+    hostPath: params.hostPath,
+  };
   if (params.configFile !== undefined) {
     assertPath(params.configFile, 'configuration path');
     payload.configFile = params.configFile;
@@ -108,6 +133,12 @@ export function decodeAuthority(authority: string): AuthorityParams {
   }
   const hostPath = record['hostPath'];
   assertPath(hostPath, 'folder path');
+  // Only a display name, but the IDE shows it when it asks whether to trust the container: it must
+  // name this folder (authorities from before 0.2.7 have none).
+  const hostName = record['hostName'];
+  if (hostName !== undefined && hostName !== containerHostName(hostPath)) {
+    throw new DevContainerError('AUTHORITY_INVALID', 'The remote authority has an invalid name.');
+  }
   const configFile = record['configFile'];
   if (configFile === undefined) {
     return { hostPath };

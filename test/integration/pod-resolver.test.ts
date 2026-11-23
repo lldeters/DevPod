@@ -177,6 +177,34 @@ describe.skipIf(process.platform === 'win32' || !hasTools)(
       });
     }
 
+    it('reads the pod under its cancellable notification, and stops before anything runs in the pod', async () => {
+      await stub.set('hang', '1'); // kubectl waits, as for a sign-in
+      state.onProgress = (progress) => {
+        setTimeout(() => progress.cancel(), 100);
+      };
+      const { resolver, logger } = createResolver();
+
+      await expect(resolver.resolve(encodePodAuthority(ref))).rejects.toThrow(
+        /kubectl get pod was cancelled/,
+      );
+      expect(state.progress.map((entry) => [entry.title, entry.cancellable])).toEqual([
+        ['Attaching to pod mypod', true],
+      ]);
+      expect((await stub.calls()).filter((args) => args.includes('exec'))).toEqual([]);
+      expect(logger.entries.some((entry) => /cancelled/.test(entry.message))).toBe(true);
+    });
+
+    it('shows what kubectl writes while it reads the pod, such as a sign-in', async () => {
+      const line = 'Please visit the following URL in your browser manually: http://localhost:8000';
+      await stub.set('stderr', `${line}\n`);
+      const { resolver, logger } = createResolver();
+
+      await resolver.resolve(encodePodAuthority(ref));
+
+      expect(state.progress[0]?.messages).toContain(line);
+      expect(logger.entries.map((entry) => entry.message)).toContain(`kubectl get pod: ${line}`);
+    });
+
     it('installs and starts the server in the pod through kubectl exec and returns its token', async () => {
       const { resolver } = createResolver();
       const resolved = (await resolver.resolve(encodePodAuthority(ref))) as unknown as Resolved;

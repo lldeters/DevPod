@@ -408,15 +408,16 @@ ein **neues Fenster**. Die Installation des Servers im Pod dauert beim ersten Ma
 
 ### 11e: Wenn es nicht klappt – häufige Ursachen
 
-| Meldung oder Beobachtung                            | Bedeutung und was du tun kannst                                                                                                  |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| „Could not run "kubectl" …“                         | `kubectl` wird nicht gefunden. Installieren, in den `PATH` legen oder `dev.containers.kubectlPath` setzen.                       |
-| „Pod … is not running (status: Pending)“            | Der Pod läuft noch nicht. Warte, bis `kubectl get pod` **Running** zeigt.                                                        |
-| „… has no container "x". Containers: a, b“          | Der Container-Name stimmt nicht (z. B. nach einem Neustart des Pods). Hänge dich neu an.                                         |
-| Fehler mit `curl`/`wget`/`tar` oder `sh: not found` | Das Image enthält die nötigen Werkzeuge nicht (z. B. „distroless“ oder sehr schlanke Images). Nimm ein anderes Image zum Testen. |
-| „download failed“ mit Adresse                       | Der Pod erreicht Kiros Download-Server nicht (Firewall/Proxy im Cluster) oder es gibt dort keinen Build für das Betriebssystem.  |
-| Das Menü „Attach to Kiro“ fehlt                     | Die Kubernetes-Extension ist nicht installiert oder du klickst nicht auf einen Pod. Nimm Variante 2.                             |
-| Kiro verlangt im Pod-Fenster eine Anmeldung         | Gleiche Ursache und Vorgehen wie bei Container-Fenstern: siehe Schritt 10e.                                                      |
+| Meldung oder Beobachtung                            | Bedeutung und was du tun kannst                                                                                                          |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| „Could not run "kubectl" …“                         | `kubectl` wird nicht gefunden. Installieren, in den `PATH` legen oder `dev.containers.kubectlPath` setzen.                               |
+| „Pod … is not running (status: Pending)“            | Der Pod läuft noch nicht. Warte, bis `kubectl get pod` **Running** zeigt.                                                                |
+| „… has no container "x". Containers: a, b“          | Der Container-Name stimmt nicht (z. B. nach einem Neustart des Pods). Hänge dich neu an.                                                 |
+| Fehler mit `curl`/`wget`/`tar` oder `sh: not found` | Das Image enthält die nötigen Werkzeuge nicht (z. B. „distroless“ oder sehr schlanke Images). Nimm ein anderes Image zum Testen.         |
+| „download failed“ mit Adresse                       | Der Pod erreicht Kiros Download-Server nicht (Firewall/Proxy im Cluster) oder es gibt dort keinen Build für das Betriebssystem.          |
+| Das Menü „Attach to Kiro“ fehlt                     | Die Kubernetes-Extension ist nicht installiert oder du klickst nicht auf einen Pod. Nimm Variante 2.                                     |
+| Kiro verlangt im Pod-Fenster eine Anmeldung         | Gleiche Ursache und Vorgehen wie bei Container-Fenstern: siehe Schritt 10e.                                                              |
+| „Reading pod …“ bleibt lange stehen                 | kubectl wartet, meist auf eine Anmeldung (OIDC, `kubelogin`) oder auf den Cluster. Ab 0.2.7 zeigt die Meldung, worauf: siehe Schritt 14. |
 
 Schick mir bei Problemen die genaue Meldung, den Inhalt von **Ansicht → Ausgabe → „Kiro Dev
 Containers“** und die Ausgabe von `kubectl get pod <name> -o wide`. Zum Aufräumen:
@@ -548,6 +549,48 @@ die Registry.
       ist er nach dem nächsten Anhängen auch aus der `mcp.json` im Pod verschwunden.
 
 Aufräumen: `kubectl delete pod kiro-mcp`.
+
+---
+
+## Schritt 14: Version 0.2.7 in Kiro 1.5.11 – Anhängen mit kubectl in WSL
+
+Mit 0.2.6 blieb _Attach to Kiro_ bei „Reading pod …“ stehen. Wahrscheinlich hat kubectl in WSL auf
+eine Anmeldung gewartet (das Plugin deiner kubeconfig, z. B. `kubelogin`), und die Extension hat
+das nicht angezeigt. 0.2.7 zeigt es an und lässt sich abbrechen.
+
+### 14a: Installieren
+
+1. Die VSIX der Version 0.2.7 installieren (wie in Schritt 3) und Kiro neu laden. Schritt 4 musst
+   du nicht wiederholen.
+2. Im Log (**Ansicht → Ausgabe → „Kiro Dev Containers“**) steht jetzt oben
+   `Dev Containers for Kiro 0.2.7 … (VS Code 1.145.0)` und darunter `Kiro 1.5.11 (commit …)`.
+
+### 14b: Anhängen
+
+1. Im Kubernetes-Explorer auf den Pod rechtsklicken → **Attach to Kiro**.
+2. Die Meldung „Reading pod …“ hat jetzt einen **Cancel**-Knopf und zeigt, was kubectl schreibt.
+   Je nach Plugin passiert eines davon:
+   - Der Browser öffnet sich mit der Anmeldung: Anmelden, danach geht es von selbst weiter.
+   - Eine Meldung „kubectl is waiting for you to sign in …“ erscheint: **Open in Browser** oder
+     **Copy Code and Open** klicken, anmelden (bei einem Code: einfügen). Danach geht es weiter.
+   - Nach 15 Sekunden steht dort „kubectl … is still running …“ ohne weitere Zeilen: kubectl wartet
+     auf etwas, das nichts ausgibt (oft der Cluster, z. B. weil WSL das VPN nicht erreicht).
+     **Cancel** klicken und mir das Log schicken.
+3. Im neuen Fenster fragt Kiro 1.5.11: _Do you trust the remote host 'pod <name> in <namespace>'?_
+   Das ist eine Frage von Kiro selbst. **Trust and Connect** klicken.
+
+### 14c: Was ich von dir brauche
+
+- Welcher der drei Fälle bei 14b eingetreten ist, und ob das Pod-Fenster danach geöffnet hat.
+- Den Inhalt von **Ansicht → Ausgabe → „Kiro Dev Containers“** aus dem Fenster, in dem du
+  geklickt hast, und, falls es aufging, aus dem Pod-Fenster.
+- Welches Anmelde-Plugin deine kubeconfig nutzt. In WSL zeigt
+  `grep -A3 'exec:' ~/.kube/<deine kubeconfig> | grep 'command:'` nur den Namen des Programms. Schick
+  nicht den ganzen `exec:`-Abschnitt: seine `args` können Geheimnisse enthalten (z. B.
+  `--oidc-client-secret`).
+- Optional, zum Vergleich in einem WSL-Terminal:
+  `kubectl --kubeconfig ~/.kube/<deine kubeconfig> get pod <name> -n <namespace>`. Fragt es dort
+  nach einer Anmeldung, und wie?
 
 ---
 

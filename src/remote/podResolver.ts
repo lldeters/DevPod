@@ -22,6 +22,8 @@ import type { ServerBuildInfo } from '../core/server/productInfo';
 import { provisionServer } from '../core/server/provisioner';
 import type { KiroLoginShare } from '../core/server/provisioner';
 import { createBridge } from './bridge';
+import { withKubectlProgress } from './kubectlFeedback';
+import type { KubectlFeedback } from './kubectlFeedback';
 import { confirmTarget } from './knownTargets';
 import type { KnownTargets } from './knownTargets';
 import { TunnelHub } from './tunnelHub';
@@ -43,6 +45,8 @@ export interface PodResolverDependencies {
   kiroLogin: (target: string) => Promise<KiroLoginShare | undefined>;
   /** The MCP servers to set up in the named target, or `undefined` if there are none. */
   mcp?: (target: string) => Promise<McpSetup | undefined>;
+  /** After how long a kubectl query is reported as still running; replaceable in tests. */
+  slowQueryMs?: number;
 }
 
 /**
@@ -126,12 +130,20 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
     }
   }
 
-  private async withCurrentContext(ref: PodRef, launcher: KubectlLauncher): Promise<PodRef> {
-    const context = await this.deps.kubectl.currentContext(ref, launcher);
+  private async withCurrentContext(
+    ref: PodRef,
+    launcher: KubectlLauncher,
+    feedback: KubectlFeedback,
+  ): Promise<PodRef> {
+    const { kubectl } = this.deps;
+    const context = await feedback.run('config view', (options) =>
+      kubectl.currentContext(ref, launcher, options),
+    );
     if (context === undefined) {
-      throw (await this.deps.kubectl.contexts(ref, launcher)).length === 0
-        ? noContextError(ref)
-        : noCurrentContextError(ref, 'window');
+      const contexts = await feedback.run('config get-contexts', (options) =>
+        kubectl.contexts(ref, launcher, options),
+      );
+      throw contexts.length === 0 ? noContextError(ref) : noCurrentContextError(ref, 'window');
     }
     this.deps.logger.log('info', `The target names no context; using the current one, ${context}`);
     return { ...ref, context };
@@ -161,23 +173,28 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
 
     const build = await this.deps.serverBuild();
     const launcher = () => this.deps.kubectlLauncher(ref.wsl, authority);
-    // A target without a context (from a link) is fixed to the current one for this connection;
-    // without any, kubectl would fall back to localhost:8080.
-    const pinned = ref.context === undefined ? await this.withCurrentContext(ref, launcher()) : ref;
-    const pod = await kubectl.pod(pinned, launcher());
-    checkContainerRunning(pod, pinned.container);
 
-    return vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `Attaching to pod ${ref.pod}`,
-        cancellable: true,
-      },
-      async (progress, token) => {
-        const abort = new AbortController();
-        token.onCancellationRequested(() => abort.abort());
+    // Everything that runs kubectl is under this notification, which can be cancelled and shows
+    // what kubectl waits for: the pod query is the first to contact the cluster, so a credential
+    // plugin may ask for a sign-in there.
+    return withKubectlProgress(
+      `Attaching to pod ${ref.pod}`,
+      logger,
+      async (feedback, report) => {
+        const signal = feedback.signal;
+        report('Reading the pod…');
+        // A target without a context (from a link) is fixed to the current one for this
+        // connection; without any, kubectl would fall back to localhost:8080.
+        const pinned =
+          ref.context === undefined
+            ? await this.withCurrentContext(ref, launcher(), feedback)
+            : ref;
+        const pod = await feedback.run('get pod', (options) =>
+          kubectl.pod(pinned, launcher(), options),
+        );
+        checkContainerRunning(pod, pinned.container);
 
-        progress.report({ message: 'Setting up the IDE server in the pod…' });
+        report('Setting up the IDE server in the pod…');
         const target = new KubectlTarget(launcher(), pinned);
         const server = await provisionServer(
           new KubectlExecutor(launcher, pinned),
@@ -188,7 +205,7 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
             ...(await this.loginInput(`the pod ${ref.namespace}/${ref.pod}`)),
           },
           logger,
-          abort.signal,
+          signal,
         );
 
         await this.setUpMcp(
@@ -197,8 +214,8 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
           server.node,
           build.serverDataFolderName,
           `the pod ${ref.namespace}/${ref.pod}`,
-          (message) => progress.report({ message }),
-          abort.signal,
+          report,
+          signal,
         );
 
         this.hub.connect({ exec: target, nodePath: server.node });
@@ -211,6 +228,7 @@ export class PodResolver implements vscode.RemoteAuthorityResolver, vscode.Dispo
           tunnelFeatures: { elevation: false, privacyOptions: [] },
         });
       },
+      this.deps.slowQueryMs,
     );
   }
 }

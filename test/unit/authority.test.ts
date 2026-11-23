@@ -1,14 +1,45 @@
 import { describe, expect, it } from 'vitest';
 import {
+  containerHostName,
   decodeAuthority,
   encodeAuthority,
   isDevContainerAuthority,
   hasUnsafeCharacters,
   isNetworkPath,
 } from '../../src/core/authority';
+import { kiroTrustName } from '../helpers/kiro';
 
 const hex = (value: unknown): string =>
   `dev-container+${Buffer.from(JSON.stringify(value), 'utf8').toString('hex')}`;
+
+describe('the name Kiro shows when it asks whether to trust the container', () => {
+  it('is the folder name', () => {
+    expect(kiroTrustName(encodeAuthority({ hostPath: '/home/me/todo-api' }))).toBe(
+      'dev container todo-api',
+    );
+    expect(kiroTrustName(encodeAuthority({ hostPath: 'C:\\Users\\me\\Mein Projekt\\' }))).toBe(
+      'dev container Mein Projekt',
+    );
+  });
+
+  it('is left out for a folder name Kiro cannot show, which then shows the authority', () => {
+    const authority = encodeAuthority({ hostPath: '/home/me/Jörg' });
+    expect(containerHostName('/home/me/Jörg')).toBeUndefined();
+    expect(kiroTrustName(authority)).toBe(authority);
+    expect(decodeAuthority(authority)).toEqual({ hostPath: '/home/me/Jörg' });
+  });
+
+  it('must name the folder of the authority; authorities without one still work', () => {
+    expect(decodeAuthority(hex({ v: 1, hostPath: '/x/app' }))).toEqual({ hostPath: '/x/app' });
+    expect(
+      decodeAuthority(hex({ v: 1, hostName: 'dev container app', hostPath: '/x/app' })),
+    ).toEqual({ hostPath: '/x/app' });
+    expect(() =>
+      decodeAuthority(hex({ v: 1, hostName: 'dev container trusted', hostPath: '/x/app' })),
+    ).toThrowError(/invalid name/);
+    expect(() => decodeAuthority(hex({ v: 1, hostName: 7, hostPath: '/x/app' }))).toThrow();
+  });
+});
 
 describe('authority', () => {
   it('round-trips a posix path', () => {

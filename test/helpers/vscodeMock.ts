@@ -41,7 +41,21 @@ export const state = {
   warnings: [] as { message: string; detail: string | undefined }[],
   /** Which button a warning is answered with; `undefined` dismisses it. */
   answerWarning: (_message: string): string | undefined => undefined,
+  /** Every progress notification, with the messages reported to it. */
+  progress: [] as ProgressRecord[],
+  /** Called when a progress notification starts, for example to cancel it. */
+  onProgress: (_progress: ProgressRecord): void => undefined,
+  /** Addresses opened with `env.openExternal`. */
+  openedExternal: [] as string[],
 };
+
+export interface ProgressRecord {
+  title: string | undefined;
+  cancellable: boolean;
+  messages: string[];
+  /** Cancels it, as the user can with the button of a cancellable notification. */
+  cancel(): void;
+}
 
 export function reset(): void {
   state.workspaceFolders = undefined;
@@ -69,6 +83,9 @@ export function reset(): void {
   state.inputBoxValue = undefined;
   state.warnings = [];
   state.answerWarning = () => undefined;
+  state.progress = [];
+  state.onProgress = () => undefined;
+  state.openedExternal = [];
 }
 
 export class Uri {
@@ -85,6 +102,12 @@ export class Uri {
   }
   static from(parts: { scheme: string; authority?: string; path?: string }): Uri {
     return new Uri(parts.scheme, parts.authority ?? '', parts.path ?? '');
+  }
+  /** Keeps the text as it is, so that `toString()` gives it back. */
+  static parse(value: string): Uri {
+    const uri = new Uri(value.slice(0, Math.max(0, value.indexOf(':'))), '', '');
+    uri.toString = () => value;
+    return uri;
   }
   toString(): string {
     return `${this.scheme}://${this.authority}${this.path}`;
@@ -208,10 +231,43 @@ export const window = {
   },
   showTextDocument: async () => undefined,
   withProgress: async <T>(
-    _options: unknown,
+    options: { title?: string; cancellable?: boolean },
     task: (progress: { report: Handler }, token: unknown) => Thenable<T>,
-  ): Promise<T> =>
-    task({ report: () => undefined }, { onCancellationRequested: () => new Disposable() }),
+  ): Promise<T> => {
+    const listeners: (() => void)[] = [];
+    let cancelled = false;
+    const record: ProgressRecord = {
+      title: options?.title,
+      cancellable: options?.cancellable ?? false,
+      messages: [],
+      cancel: () => {
+        cancelled = true;
+        listeners.splice(0).forEach((listener) => listener());
+      },
+    };
+    state.progress.push(record);
+    state.onProgress(record);
+    const token = {
+      get isCancellationRequested() {
+        return cancelled;
+      },
+      onCancellationRequested: (listener: () => void) => {
+        listeners.push(listener);
+        return new Disposable(() => {
+          const index = listeners.indexOf(listener);
+          if (index >= 0) listeners.splice(index, 1);
+        });
+      },
+    };
+    return task(
+      {
+        report: (value: { message?: string }) => {
+          if (value?.message !== undefined) record.messages.push(value.message);
+        },
+      },
+      token,
+    );
+  },
 };
 
 type Tree = Record<string, unknown>;
@@ -301,6 +357,10 @@ export const version = '1.103.2';
 
 export const env = {
   appName: 'Kiro',
+  openExternal: async (target: { toString(): string }): Promise<boolean> => {
+    state.openedExternal.push(target.toString());
+    return true;
+  },
   clipboard: {
     writeText: async (text: string): Promise<void> => {
       state.clipboard = text;

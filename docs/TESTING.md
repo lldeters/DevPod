@@ -118,6 +118,15 @@ With kubectl installed only inside WSL and `dev.containers.kubectlInWSL` set to 
       WSL opens it instead.
 - [ ] Turning the setting off and reloading a window that was attached in WSL still connects
       through WSL.
+- [ ] With a credential plugin that asks for a sign-in (token not cached in WSL), _Reading pod …_
+      shows what the plugin writes, a notification offers **Open in Browser** (and **Copy Code and
+      Open** for a device code), and after signing in the new window opens. The log has the lines
+      as `kubectl get pod: ...`.
+- [ ] After 15 seconds without an answer, the notification says that kubectl is still running.
+      **Cancel** stops it, opens no window and shows no error. (In WSL: whether the plugin's
+      process in the distribution ends too.)
+- [ ] Kiro 1.5.11 and later: the new window asks _Do you trust the remote host 'pod <pod> in
+      <namespace>'?_ (not a hex string); _Trust and Connect_ goes on.
 
 ### 7c. MCP servers in pods
 

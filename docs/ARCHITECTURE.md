@@ -10,7 +10,8 @@ src/core/     Pure TypeScript. No `vscode` import (enforced by ESLint). Fully un
   server/       IDE server provisioning: product info, URL template, platform detection,
                 install/start script, provisioner, stdio bridge script
   exec/         ExecTarget: where a command runs (Docker container, pod container)
-  k8s/          pod references and `k8s-pod+<hex>` authorities, kubectl arguments, pod parsing
+  k8s/          pod references and `k8s-pod+<hex>` authorities, kubectl arguments, pod parsing,
+                sign-in requests in kubectl's stderr
   tunnel.ts     loopback port forwarding through bridge processes
   authority.ts  encode/decode of the `dev-container+<hex>` remote authority
   argv.ts       edit argv.json (enable-proposed-api) while preserving comments
@@ -18,6 +19,7 @@ src/remote/   Editor integration for the connection (uses `vscode`)
   resolver.ts   RemoteAuthorityResolver for dev containers: up → provision server → connection
   podResolver.ts RemoteAuthorityResolver for pods: check pod → provision server → connection
   tunnelHub.ts  port forwarding for one window, shared by both resolvers
+  kubectlFeedback.ts cancellable notification for kubectl queries: stderr, sign-ins, slow queries
   bridge.ts     ManagedMessagePassing over `docker exec -i … node -e <bridge>`
   product.ts    reads the IDE's product.json via `env.appRoot`
   proposed.d.ts local declarations for the `resolvers` proposed API
@@ -222,6 +224,25 @@ exec -i --container=... pod -- ...` for a pod.
    - A problem is logged and does not stop the connection. Without the GitLab bundle and without
      `dev.containers.mcpServers` (not even `{}`), nothing runs in the pod.
 
+8. **Waiting kubectl** (`src/remote/kubectlFeedback.ts`, `src/core/k8s/signIn.ts`). Reading the
+   pod is the first query that contacts the cluster, and kubectl can wait there without a word: a
+   credential plugin of the kubeconfig waits for a sign-in in the browser or for a device code, and
+   an unreachable cluster answers only after timeouts. (In 0.2.6 this looked like _Attach to Kiro_
+   loading forever with kubectl in WSL.) So every query that contacts the cluster, in the attach
+   command and in the pod resolver, runs under a cancellable notification: `Kubectl` passes kubectl's
+   stderr lines on as they are written (`QueryOptions.onStderrLine`), which go to the log and the
+   notification, and the notification's _Cancel_ aborts the query's `AbortSignal`, which kills
+   kubectl (the query then fails with `CANCELLED`, which commands log without an error message).
+   After 15 seconds the notification says that kubectl may be waiting for a sign-in or the cluster.
+   `SignInDetector` recognizes a request to sign in in those lines: an address with words such as
+   _sign in_, _visit_ or _browser_ on the line (or on one of the three lines before, as Pinniped
+   prints it), and a device code (upper-case letters and digits after _enter the code_ or before
+   _when asked in your browser_). It offers only https addresses and http on this machine, ignores
+   klog lines (whose URLs are the cluster's API), and is fed only by queries kubectl runs here,
+   never by `kubectl exec`, whose stderr the pod writes. The notification offers _Open in Browser_
+   and _Copy Code and Open_; nothing is opened without a click. The pod resolver reads the pod
+   inside its _Attaching to pod_ notification for the same reason, before anything runs in the pod.
+
 Limits: the pod needs `sh`, `curl` or `wget` and `tar`; `kubectl exec` streams can be cut by proxies
 or API server timeouts on long idle periods (the window then reconnects); the server and what it
 installed disappear with the pod.
@@ -234,6 +255,13 @@ installed disappear with the pod.
   `ELECTRON_RUN_AS_NODE=1`.
 - **Container identity** comes from the CLI's own labels (`devcontainer.local_folder`,
   `devcontainer.config_file`), so containers started from a terminal with the CLI are reused.
+- **Authorities carry a display name** (`hostName` in their JSON): `pod <pod> in <namespace>` and
+  `dev container <folder>`. Kiro 1.5.11 asks whether to trust a remote before it starts the remote
+  extension host and names it by that field, if it has only letters, digits, `._~:-[]` and single
+  spaces (the convention of `ssh-remote+<hex>` authorities); without it, Kiro shows the whole hex
+  string. A folder name with other characters gets no name. The name is derived from the other
+  fields, and an authority whose name differs is refused, so a link cannot have Kiro show the name
+  of another pod; authorities without one (before 0.2.7) are still accepted.
 - **Authorities are untrusted input** (they can come from links): decoded strictly, paths are only
   passed as arguments, never through a shell, network paths (`\\host\share`, `\\?\UNC\...`,
   `//host/...`) are refused because reading one already contacts that host, and an authority the
@@ -262,6 +290,18 @@ checked on **2026-10-24 with Kiro 1.4.26 (VS Code base 1.131.0), Windows x64, Do
 
 Still unverified in Kiro: macOS/Linux hosts, Podman, Compose/Dockerfile configurations and
 which `node` the bridge uses (the server's bundled one if present, else the container's).
+
+**Kiro 1.5.11** (VS Code base 1.145.0, 2026-11-20) was checked against its Linux build, without
+running it: `vscode.proposed.resolvers.d.ts` is unchanged between VS Code 1.131.0 and 1.145.0;
+`enable-proposed-api` from `argv.json` and the proposed-API check work as before; `product.json`
+has the same server fields (`kiro-server`, `.kiro-server`, the same download template); the server
+archive has the same layout and accepts the same options and prints `Extension host agent listening
+on <port>`. New: the server's launcher sources `bin/helpers/ssh-image-lease.sh`, which only applies
+to Kiro's own `~/.kiro-ssh/.../server` folders and returns at once for ours; Kiro asks whether to
+trust a remote before the remote extension host starts (see the display name above); and Kiro has
+its own Dev Containers (`kiro-dev-container+` authorities, extension `kiro.kiro-dev-containers`,
+which bundles the Dev Container CLI 0.88.0) and Remote SSH (`kiro-ssh+`), which do not collide with
+this extension's names.
 
 ## Security notes
 

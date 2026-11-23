@@ -10,7 +10,7 @@ import { errorMessage } from './core/errors';
 import { Kubectl } from './core/k8s/kubectl';
 import { POD_AUTHORITY_PREFIX } from './core/k8s/podRef';
 import { PodResolver } from './remote/podResolver';
-import { readServerBuildInfo } from './remote/product';
+import { readProduct, readServerBuildInfo } from './remote/product';
 import { KnownTargets } from './remote/knownTargets';
 import { PodKubectlPaths } from './remote/podKubectlPaths';
 import { RebuildRequests } from './remote/rebuildRequests';
@@ -33,8 +33,21 @@ export function activate(context: vscode.ExtensionContext): void {
     'info',
     `Dev Containers for Kiro ${
       (context.extension.packageJSON as { version?: string } | undefined)?.version ?? 'unknown'
-    } (build ${BUILD_ID}) in ${vscode.env.appName} ${vscode.version}`,
+    } (build ${BUILD_ID}) in ${vscode.env.appName} (VS Code ${vscode.version})`,
   );
+  // vscode.version is the VS Code base; the IDE's own version is in its product.json.
+  void readProduct()
+    .then((product) => {
+      const version = product['version'];
+      const commit = product['commit'];
+      if (typeof version === 'string') {
+        logger.log(
+          'info',
+          `${vscode.env.appName} ${version}${typeof commit === 'string' ? ` (commit ${commit.slice(0, 12)})` : ''}`,
+        );
+      }
+    })
+    .catch(() => undefined);
 
   const engine = new ContainerEngine(() => readSettings().dockerPath);
   const cli = new DevContainerCli(

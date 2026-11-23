@@ -261,6 +261,97 @@ describe('attach from the Kubernetes explorer', () => {
   });
 });
 
+/** Polls until `condition` holds; kubectl runs as a separate process. */
+async function waitFor(condition: () => boolean, what: string, ms = 5000): Promise<void> {
+  const until = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+describe('while kubectl waits (a sign-in, a slow cluster)', () => {
+  const deviceCodeLine =
+    'To sign in, use a web browser to open the page https://microsoft.com/devicelogin and ' +
+    'enter the code DXGT9CMZW to authenticate.';
+
+  it('shows what a credential plugin writes, offers its sign-in, and goes on afterwards', async () => {
+    await stub.set('stderr', `${deviceCodeLine}\n`);
+    await stub.set('hang', '1');
+    state.nextChoice = 'Copy Code and Open';
+    const deps = dependencies({ target: clickedPod });
+
+    const attaching = attachToPod(deps, {});
+    await waitFor(
+      () => state.infoMessages.some((message) => message.includes('DXGT9CMZW')),
+      'the sign-in offer',
+    );
+    expect(state.infoMessages).toContain(
+      'kubectl is waiting for you to sign in: open https://microsoft.com/devicelogin and ' +
+        'enter the code DXGT9CMZW.',
+    );
+    await waitFor(() => state.openedExternal.length > 0, 'the browser');
+    expect(state.clipboard).toBe('DXGT9CMZW');
+    expect(state.openedExternal).toEqual(['https://microsoft.com/devicelogin']);
+    expect(openedWindow()).toBeUndefined(); // still waiting for kubectl
+
+    await stub.set('release', '1'); // the sign-in is done
+    await attaching;
+
+    expect(openedWindow()).toBeDefined();
+    const reading = state.progress.find((entry) => entry.title === 'Reading pod mypod');
+    expect(reading?.cancellable).toBe(true);
+    expect(reading?.messages).toContain(deviceCodeLine);
+    const lines = (deps.logger as MemoryLogger).entries.map((entry) => entry.message);
+    expect(lines).toContain(`kubectl get pod: ${deviceCodeLine}`);
+  });
+
+  it('stops kubectl when the notification is cancelled, and opens no window', async () => {
+    await stub.set('hang', '1');
+    state.onProgress = (progress) => {
+      setTimeout(() => progress.cancel(), 100);
+    };
+
+    await expect(attachToPod(dependencies({ target: clickedPod }), {})).rejects.toMatchObject({
+      code: 'CANCELLED',
+    });
+    expect(openedWindow()).toBeUndefined();
+    expect(state.errorMessages).toEqual([]);
+  });
+
+  it('says so when kubectl takes long, with what it may be waiting for', async () => {
+    await stub.set('hang', '1');
+    const deps = { ...dependencies({ target: clickedPod }), slowQueryMs: 50 };
+
+    const attaching = attachToPod(deps, {});
+    const reading = () => state.progress.find((entry) => entry.title === 'Reading pod mypod');
+    await waitFor(() => (reading()?.messages.length ?? 0) > 0, 'the hint');
+    expect(reading()?.messages[0]).toMatch(/still running; it may be waiting for a sign-in/);
+    await stub.set('release', '1');
+    await attaching;
+
+    expect(openedWindow()).toBeDefined();
+    expect(
+      (deps.logger as MemoryLogger).entries.some(
+        (entry) => entry.level === 'warn' && /get pod is still running/.test(entry.message),
+      ),
+    ).toBe(true);
+  });
+
+  it('offers no sign-in for the API address in an error of kubectl itself', async () => {
+    await stub.set(
+      'stderr',
+      "E1123 10:43:20.123456   12345 memcache.go:265] couldn't get current server API group " +
+        'list: Get "https://10.0.0.1:6443/api?timeout=32s": dial tcp 10.0.0.1:6443: i/o timeout\n',
+    );
+
+    await attachToPod(dependencies({ target: clickedPod }), {});
+
+    expect(state.infoMessages).toEqual([]);
+    expect(state.openedExternal).toEqual([]);
+  });
+});
+
 describe('attach from the command palette', () => {
   it('walks through context, namespace and pod', async () => {
     await stub.set('contexts', 'kind-test\nother\n');

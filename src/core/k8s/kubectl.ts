@@ -385,6 +385,24 @@ export function noCurrentContextError(
   );
 }
 
+/**
+ * How one query runs. A query that contacts the cluster can wait for a long time without a word:
+ * a credential plugin of the kubeconfig (OIDC, `kubelogin`, ...) may wait for a sign-in in the
+ * browser or for a device code to be entered, and an unreachable cluster answers only after
+ * timeouts. What kubectl and such plugins write to stderr while it runs is passed on, so the user
+ * can see what it waits for, and the query can be stopped.
+ */
+export interface QueryOptions {
+  /** Stops kubectl; the query then fails with a `CANCELLED` error. */
+  signal?: AbortSignal;
+  /** Every line kubectl writes to stderr, as soon as it is written. */
+  onStderrLine?: (line: string) => void;
+}
+
+function cancelled(label: string): DevContainerError {
+  return new DevContainerError('CANCELLED', `kubectl ${label} was cancelled.`);
+}
+
 /** Read-only kubectl queries used to choose what to attach to. */
 export class Kubectl {
   constructor(
@@ -411,8 +429,8 @@ export class Kubectl {
     );
   }
 
-  private run(label: string, args: string[]): Promise<string> {
-    return this.runWith(this.current(), label, args);
+  private run(label: string, args: string[], options?: QueryOptions): Promise<string> {
+    return this.runWith(this.current(), label, args, undefined, options);
   }
 
   private async runWith(
@@ -420,7 +438,12 @@ export class Kubectl {
     label: string,
     args: string[],
     launcher = this.launcher(scope.wsl),
+    options: QueryOptions = {},
   ): Promise<string> {
+    const { signal, onStderrLine } = options;
+    if (signal?.aborted) {
+      throw cancelled(label);
+    }
     const {
       command,
       args: processArgs,
@@ -430,15 +453,21 @@ export class Kubectl {
     const extra = { ...(launcher.wsl ? { WSL_UTF8: '1' } : {}), ...env };
     let result: RunResult;
     try {
-      result = await runProcess(
-        command,
-        processArgs,
-        Object.keys(extra).length > 0 ? { env: { ...process.env, ...extra } } : {},
-      );
+      result = await runProcess(command, processArgs, {
+        ...(Object.keys(extra).length > 0 ? { env: { ...process.env, ...extra } } : {}),
+        ...(signal === undefined ? {} : { signal }),
+        ...(onStderrLine === undefined ? {} : { onStderrLine }),
+      });
     } catch (error) {
+      if (signal?.aborted) {
+        throw cancelled(label);
+      }
       throw new DevContainerError('ENGINE_UNAVAILABLE', notStartedMessage(launcher), {
         cause: error,
       });
+    }
+    if (signal?.aborted) {
+      throw cancelled(label);
     }
     if (result.code !== 0) {
       throw queryFailure(launcher, label, result);
@@ -455,6 +484,7 @@ export class Kubectl {
   async currentContext(
     scope: KubectlScope = this.current(),
     launcher?: KubectlLauncher,
+    options?: QueryOptions,
   ): Promise<string | undefined> {
     const name = (
       await this.runWith(
@@ -462,6 +492,7 @@ export class Kubectl {
         'config view',
         ['config', 'view', '--output=jsonpath={.current-context}'],
         launcher,
+        options,
       )
     ).trim();
     return name === '' ? undefined : name;
@@ -470,6 +501,7 @@ export class Kubectl {
   async contexts(
     scope: KubectlScope = this.current(),
     launcher?: KubectlLauncher,
+    options?: QueryOptions,
   ): Promise<string[]> {
     return (
       await this.runWith(
@@ -477,6 +509,7 @@ export class Kubectl {
         'config get-contexts',
         ['config', 'get-contexts', '--output=name'],
         launcher,
+        options,
       )
     )
       .split('\n')
@@ -484,27 +517,27 @@ export class Kubectl {
       .filter((line) => line !== '');
   }
 
-  async namespaces(context: string | undefined): Promise<string[]> {
+  async namespaces(context: string | undefined, options?: QueryOptions): Promise<string[]> {
     return parseNames(
-      await this.run('get namespaces', [
-        ...kubectlBaseArgs({ context }),
-        'get',
-        'namespaces',
-        '-o',
-        'json',
-      ]),
+      await this.run(
+        'get namespaces',
+        [...kubectlBaseArgs({ context }), 'get', 'namespaces', '-o', 'json'],
+        options,
+      ),
     );
   }
 
-  async pods(context: string | undefined, namespace: string): Promise<string[]> {
+  async pods(
+    context: string | undefined,
+    namespace: string,
+    options?: QueryOptions,
+  ): Promise<string[]> {
     return parseNames(
-      await this.run('get pods', [
-        ...kubectlBaseArgs({ context, namespace }),
-        'get',
-        'pods',
-        '-o',
-        'json',
-      ]),
+      await this.run(
+        'get pods',
+        [...kubectlBaseArgs({ context, namespace }), 'get', 'pods', '-o', 'json'],
+        options,
+      ),
     );
   }
 
@@ -523,6 +556,7 @@ export class Kubectl {
       wsl?: WslSelection;
     },
     launcher?: KubectlLauncher,
+    options?: QueryOptions,
   ): Promise<PodInfo> {
     // Validated like an attach target, since the values become arguments.
     assertPodRef({ ...selection, container: 'placeholder' });
@@ -539,6 +573,7 @@ export class Kubectl {
           'json',
         ],
         launcher,
+        options,
       ),
     );
   }
